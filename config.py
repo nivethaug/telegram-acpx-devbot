@@ -25,7 +25,7 @@ TASK_TIMEOUT = 0
 TELEGRAM_BUFFER_SIZE = 5
 
 # GLM API usage for output summarization
-USE_GLM = False  # Disabled by default - set to True to enable (requires correct ZAI model name)
+USE_GLM = True  # Enable GLM summarization (ZAI API) - Note: Requires API balance
 ZAI_API_KEY = ""  # Set ZAI_API_KEY environment variable or add here
 ZAI_API_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
-ZAI_MODEL = "glm-4-plus"  # Model for summarization (requires API key with this model access)
+ZAI_MODEL = "glm-4.5"  # Model for summarization (ZAI API)

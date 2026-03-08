@@ -9,7 +9,7 @@ from typing import Optional
 # GLM/ZAI API Configuration
 ZAI_API_KEY = os.environ.get('ZAI_API_KEY', '')
 ZAI_API_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
-ZAI_MODEL = "glm-4"  # Use glm-4 for summarization
+ZAI_MODEL = "glm-4.5"  # Use glm-4.5 for summarization (ZAI API)
 
 # Fallback patterns if GLM API is unavailable
 NOISE_PATTERNS = [
