@@ -3,7 +3,7 @@ Configuration for Telegram ACPX Dev Bot
 """
 
 # Telegram Bot Token (set via environment variable)
-TELEGRAM_BOT_TOKEN = ""
+TELEGRAM_BOT_TOKEN = "8754771378:AAFqdZNwYc8JbZanNy901IQr6lFmJs1gtm4"
 
 # Allowed user IDs (empty means all users are allowed)
 # Add your Telegram user ID to restrict access

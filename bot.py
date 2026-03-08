@@ -4,6 +4,7 @@ A lightweight Telegram bot for running ACPX Claude coding tasks remotely
 """
 import os
 import sys
+import asyncio
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import threading
@@ -17,12 +18,55 @@ from server_tools import get_server_status
 runner = ClaudeRunner()
 current_task_thread = None
 
+# Status heartbeat variables
+status_loop_task = None
+current_task_description = None
+status_message_id = None
+STATUS_INTERVAL = 120  # 2 minutes in seconds
+
 
 def is_user_allowed(user_id):
     """Check if user is allowed to use the bot"""
     if not ALLOWED_USER_IDS:
         return True  # Allow all if list is empty
     return user_id in ALLOWED_USER_IDS
+
+
+async def status_update_coroutine(update, task_description, stop_event):
+    """
+    Send periodic status updates every 2 minutes while task is running
+    
+    Args:
+        update: Telegram update object for sending messages
+        task_description: Description of current task
+        stop_event: asyncio.Event to signal when to stop
+    """
+    global status_message_id
+    
+    # Send initial status message
+    status_text = f"⏳ Agent still working...\n\nTask: {task_description}"
+    message = await update.message.reply_text(status_text)
+    status_message_id = message.message_id
+    
+    # Loop until stop event is set
+    while not stop_event.is_set():
+        try:
+            await asyncio.sleep(STATUS_INTERVAL)
+            
+            # Check if task is still running
+            if not runner.is_running:
+                break
+                
+            # Send update to the same message
+            try:
+                elapsed_text = f"\n\n⏳ Agent still working...\nTask: {task_description}"
+                await update.message.reply_text(elapsed_text, reply_to_message_id=status_message_id)
+            except Exception as e:
+                print(f"Error sending status update: {e}")
+                break
+                
+        except asyncio.CancelledError:
+            break
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -49,7 +93,7 @@ Get started by sending a task!"""
 
 async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /dev command"""
-    global current_task_thread, runner
+    global current_task_thread, runner, status_loop_task, current_task_description, status_message_id
 
     if not is_user_allowed(update.effective_user.id):
         await update.message.reply_text("❌ You are not authorized to use this bot.")
@@ -66,6 +110,12 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     task = ' '.join(context.args)
+    
+    # Store task description for status updates
+    current_task_description = task
+    
+    # Create stop event for status loop
+    stop_event = asyncio.Event()
 
     # Send initial message
     await update.message.reply_text(f"🚀 **Task Started**\n\n```\n{task}\n```", parse_mode='Markdown')
@@ -79,6 +129,15 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Run task in thread
     def run_task():
+        global status_loop_task
+        
+        # Start status update loop
+        stop_event.clear()
+        status_loop_task = asyncio.create_task(
+            status_update_coroutine(update, task, stop_event)
+        )
+        
+        # Send initial status messages
         for line in [f"🚀 Task started", f"Running: {task}"]:
             context.application.create_task(send_output(line))
 
@@ -88,6 +147,16 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.application.create_task(send_output("✅ Task finished successfully"))
         else:
             context.application.create_task(send_output(f"⚠️ Task finished with code: {return_code}"))
+        
+        # Task finished - stop status loop
+        stop_event.set()
+        if status_loop_task and not status_loop_task.done():
+            status_loop_task.cancel()
+        
+        # Clear task description
+        current_task_description = None
+        status_message_id = None
+        status_loop_task = None
 
     current_task_thread = threading.Thread(target=run_task)
     current_task_thread.start()
@@ -105,7 +174,7 @@ async def server_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /stop command"""
-    global runner
+    global runner, current_task_description, status_loop_task
 
     if not is_user_allowed(update.effective_user.id):
         await update.message.reply_text("❌ You are not authorized to use this bot.")
@@ -113,6 +182,10 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if runner.stop():
         await update.message.reply_text("🛑 Task stopped by user")
+        
+        # Stop status loop if running
+        if status_loop_task and not status_loop_task.done():
+            status_loop_task.cancel()
     else:
         await update.message.reply_text("ℹ️ No task is currently running")
 
