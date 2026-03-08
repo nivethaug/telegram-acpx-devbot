@@ -13,7 +13,7 @@ ALLOWED_USER_IDS = []
 ACPX_CLAUDE_PATH = "/usr/lib/node_modules/openclaw/extensions/acpx/node_modules/acpx/dist/cli.js"
 
 # Workspace directory for running tasks
-WORKSPACE_DIR = "/root/workspace"
+WORKSPACE_DIR = "/root/workspace/frontend-test"
 
 # Maximum message length for Telegram (Telegram limit is 4096)
 MAX_MESSAGE_LENGTH = 4000
