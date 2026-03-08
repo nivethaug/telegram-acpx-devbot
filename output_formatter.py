@@ -6,10 +6,10 @@ import json
 import os
 from typing import Optional
 
-# GLM API Configuration
-GLM_API_KEY = os.environ.get('GLM_API_KEY', '')
-GLM_API_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
-GLM_MODEL = "glm-4-flash"  # Fast model for summarization
+# GLM/ZAI API Configuration
+ZAI_API_KEY = os.environ.get('ZAI_API_KEY', '')
+ZAI_API_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+ZAI_MODEL = "glm-4"  # Use glm-4 for summarization
 
 # Fallback patterns if GLM API is unavailable
 NOISE_PATTERNS = [
@@ -27,7 +27,7 @@ class OutputFormatter:
     """Converts raw ACPX output into human-readable summaries"""
 
     def __init__(self, use_glm=True):
-        self.use_glm = use_glm and GLM_API_KEY
+        self.use_glm = use_glm and ZAI_API_KEY
 
     def summarize_output(self, raw_text: str) -> str:
         """
@@ -69,12 +69,12 @@ Logs:
 Summary:"""
 
         headers = {
-            "Authorization": f"Bearer {GLM_API_KEY}",
+            "Authorization": f"Bearer {ZAI_API_KEY}",
             "Content-Type": "application/json"
         }
 
         payload = {
-            "model": GLM_MODEL,
+            "model": ZAI_MODEL,
             "messages": [
                 {
                     "role": "user",
@@ -86,7 +86,7 @@ Summary:"""
         }
 
         response = requests.post(
-            GLM_API_URL,
+            ZAI_API_URL,
             headers=headers,
             json=payload,
             timeout=10
