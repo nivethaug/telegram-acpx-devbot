@@ -8,7 +8,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import threading
 
-from config import TELEGRAM_BOT_TOKEN, ALLOWED_USER_IDS
+from config import TELEGRAM_BOT_TOKEN, ALLOWED_USER_IDS, TELEGRAM_BUFFER_SIZE
 from claude_runner import ClaudeRunner
 from server_tools import get_server_status
 
@@ -68,25 +68,46 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     task = ' '.join(context.args)
 
     # Send initial message
-    await update.message.reply_text(f"🚀 **Task Started**\n\n```\n{task}\n```", parse_mode='Markdown')
+    status_message = await update.message.reply_text(f"🚀 **Task Started**\n\n```\n{task}\n```", parse_mode='Markdown')
 
-    # Define callback for streaming output
+    # Buffer for batched streaming
+    output_buffer = []
+    BUFFER_SIZE = TELEGRAM_BUFFER_SIZE  # Send updates every N lines (from config)
+
+    # Define callback for batched streaming output
     async def send_output(line):
-        try:
-            await update.message.reply_text(line)
-        except Exception as e:
-            print(f"Error sending message: {e}")
+        nonlocal output_buffer
+        output_buffer.append(line)
+        
+        if len(output_buffer) >= BUFFER_SIZE:
+            # Update status message with batched output
+            batched_text = "\n".join(output_buffer)
+            try:
+                await status_message.edit_text(f"🚀 **Task Started**\n\n```\n{task}\n\n{batched_text}```", parse_mode='Markdown')
+            except Exception as e:
+                print(f"Error editing message: {e}")
+            output_buffer.clear()
+
+    # Define async function to flush remaining buffer
+    async def flush_buffer():
+        nonlocal output_buffer
+        if output_buffer:
+            batched_text = "\n".join(output_buffer)
+            try:
+                await status_message.edit_text(f"🚀 **Task Started**\n\n```\n{task}\n\n{batched_text}```", parse_mode='Markdown')
+            except Exception as e:
+                print(f"Error editing message: {e}")
+            output_buffer.clear()
 
     # Run task in thread
     def run_task():
-        for line in [f"🚀 Task started", f"Running: {task}"]:
-            context.application.create_task(send_output(line))
-
         return_code = runner.run_task(task, lambda line: context.application.create_task(send_output(line)))
 
         if return_code == 0:
+            context.application.create_task(flush_buffer())
             context.application.create_task(send_output("✅ Task finished successfully"))
         else:
+            context.application.create_task(flush_buffer())
             context.application.create_task(send_output(f"⚠️ Task finished with code: {return_code}"))
 
     current_task_thread = threading.Thread(target=run_task)

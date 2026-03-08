@@ -20,3 +20,6 @@ MAX_MESSAGE_LENGTH = 4000
 
 # Task timeout in seconds (0 = no timeout)
 TASK_TIMEOUT = 0
+
+# Telegram output buffer size (number of lines before batching)
+TELEGRAM_BUFFER_SIZE = 5
