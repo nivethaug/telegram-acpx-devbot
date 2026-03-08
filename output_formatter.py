@@ -7,6 +7,7 @@ import os
 from typing import Optional
 
 # GLM/ZAI API Configuration
+GLM_DEBUG = os.environ.get('GLM_DEBUG', 'False').lower() in ('true', '1', 'yes')
 ZAI_API_KEY = os.environ.get('ZAI_API_KEY', '')
 ZAI_API_URL = "https://api.z.ai/api/coding/paas/v4/chat/completions"  # ZAI API endpoint
 ZAI_MODEL = "glm-4.5"  # Use glm-4.5 for summarization (ZAI API)
@@ -28,6 +29,8 @@ class OutputFormatter:
 
     def __init__(self, use_glm=True):
         self.use_glm = use_glm and ZAI_API_KEY
+        self.debug_mode = True  # Enable debug logging for GLM
+        self.call_count = 0  # Track API calls
 
     def summarize_output(self, raw_text: str) -> str:
         """
@@ -95,6 +98,11 @@ Summary:"""
         if response.status_code == 200:
             result = response.json()
             summary = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+            
+            if self.debug_mode:
+                print(f"[GLM DEBUG] Response: {summary[:100]}")
+                print(f"[GLM DEBUG] Summary length: {len(summary)} chars")
+            
             return summary.strip()
         else:
             raise Exception(f"GLM API error: {response.status_code} - {response.text}")
