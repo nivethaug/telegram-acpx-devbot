@@ -23,3 +23,7 @@ TASK_TIMEOUT = 0
 
 # Telegram output buffer size (number of lines before batching)
 TELEGRAM_BUFFER_SIZE = 5
+
+# GLM API usage for output summarization
+USE_GLM = True  # Set to False to use pattern-based filtering only
+GLM_API_KEY = ""  # Set GLM_API_KEY environment variable or add here

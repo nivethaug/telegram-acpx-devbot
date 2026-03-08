@@ -9,13 +9,13 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import threading
 
-from config import TELEGRAM_BOT_TOKEN, ALLOWED_USER_IDS, TELEGRAM_BUFFER_SIZE
+from config import TELEGRAM_BOT_TOKEN, ALLOWED_USER_IDS, TELEGRAM_BUFFER_SIZE, USE_GLM
 from claude_runner import ClaudeRunner
 from server_tools import get_server_status
 
 
 # Global runner instance
-runner = ClaudeRunner()
+runner = ClaudeRunner(use_glm=USE_GLM)
 current_task_thread = None
 
 

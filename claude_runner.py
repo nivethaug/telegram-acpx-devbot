@@ -3,26 +3,22 @@ Claude runner - executes ACPX Claude tasks via subprocess
 """
 import subprocess
 import os
+import time
 from config import ACPX_CLAUDE_PATH, WORKSPACE_DIR, MAX_MESSAGE_LENGTH
-
-# Patterns to filter out from ACPX output (telemetry noise)
-NOISE_PATTERNS = [
-    "jsonrpc",
-    "session/update",
-    "usage_update",
-    "invalid params",
-    "invalid input",
-    "error handling notification",
-    "end_turn",
-]
+from output_formatter import OutputFormatter
 
 
 class ClaudeRunner:
     """Runner for ACPX Claude tasks"""
 
-    def __init__(self):
+    def __init__(self, use_glm=True):
         self.process = None
         self.is_running = False
+        self.formatter = OutputFormatter(use_glm=use_glm)
+        self.output_buffer = []
+        self.buffer_size = 20  # Summarize every 20 lines
+        self.last_summary_time = 0
+        self.summary_interval = 5  # Minimum seconds between summaries
 
     def run_task(self, task, update_callback):
         """
@@ -63,24 +59,45 @@ class ClaudeRunner:
                 if not line:
                     continue
 
-                # Skip telemetry noise
-                clean = line.lower()
-                if any(pattern in clean for pattern in NOISE_PATTERNS):
-                    continue
+                # Add to buffer for summarization
+                self.output_buffer.append(line)
 
-                # Skip [done] markers
-                if clean.startswith("[done]"):
-                    continue
+                # Send summary when buffer is full or interval elapsed
+                current_time = time.time()
+                time_since_last = current_time - self.last_summary_time
 
-                # Truncate if too long (Telegram limit: 4096 chars, use 3500 to be safe)
-                if len(line) > 3500:
-                    line = line[:3500] + "..."
+                should_summarize = (
+                    len(self.output_buffer) >= self.buffer_size or
+                    time_since_last >= self.summary_interval
+                )
 
-                # Send clean line to Telegram
-                update_callback(line)
+                if should_summarize:
+                    # Generate summary using GLM or pattern filtering
+                    raw_text = '\n'.join(self.output_buffer)
+                    try:
+                        summary = self.formatter.summarize_output(raw_text)
+                        update_callback(summary)
+                    except Exception as e:
+                        # Fallback: send last useful line
+                        print(f"Summarization failed: {e}")
+                        update_callback(self._get_last_useful_line())
+
+                    # Reset buffer
+                    self.output_buffer.clear()
+                    self.last_summary_time = current_time
 
             # Wait for process to complete
             return_code = self.process.wait()
+
+            # Flush remaining buffer
+            if self.output_buffer:
+                raw_text = '\n'.join(self.output_buffer)
+                try:
+                    summary = self.formatter.summarize_output(raw_text)
+                    update_callback(summary)
+                except Exception as e:
+                    update_callback(self._get_last_useful_line())
+                self.output_buffer.clear()
 
         except Exception as e:
             update_callback(f"❌ Error: {str(e)}")
@@ -91,6 +108,25 @@ class ClaudeRunner:
             self.process = None
 
         return return_code
+
+    def _get_last_useful_line(self):
+        """Extract the last useful line from buffer as fallback"""
+        useful_keywords = [
+            "creating", "analyzing", "updating", "building",
+            "installing", "reading", "writing", "editing",
+            "completed", "success", "done"
+        ]
+
+        for line in reversed(self.output_buffer):
+            if any(keyword in line.lower() for keyword in useful_keywords):
+                # Truncate long lines
+                if len(line) > 150:
+                    line = line[:150] + "..."
+                return line.strip()
+
+        # Fallback: last line
+        last_line = self.output_buffer[-1] if self.output_buffer else ""
+        return last_line[:150] + "..." if len(last_line) > 150 else last_line.strip()
 
     def stop(self):
         """Stop the currently running task"""
