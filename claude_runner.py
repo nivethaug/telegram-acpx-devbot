@@ -26,8 +26,8 @@ class ClaudeRunner:
         # Ensure workspace directory exists
         os.makedirs(WORKSPACE_DIR, exist_ok=True)
 
-        # Build command
-        cmd = ["node", ACPX_CLAUDE_PATH, "claude", "exec", task]
+        # Build command with stdbuf for unbuffered output
+        cmd = ["stdbuf", "-oL", "node", ACPX_CLAUDE_PATH, "claude", "exec", task]
 
         try:
             self.process = subprocess.Popen(
@@ -36,11 +36,12 @@ class ClaudeRunner:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
-                bufsize=1  # Line buffered
+                bufsize=1,
+                universal_newlines=True
             )
 
-            # Stream output line by line
-            for line in self.process.stdout:
+            # Stream output line by line using readline
+            for line in iter(self.process.stdout.readline, ""):
                 if not self.is_running:
                     self.process.terminate()
                     break
