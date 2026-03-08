@@ -4,6 +4,7 @@ A lightweight Telegram bot for running ACPX Claude coding tasks remotely
 """
 import os
 import sys
+import asyncio
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import threading
@@ -99,16 +100,19 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 print(f"Error editing message: {e}")
             output_buffer.clear()
 
+    # Get the event loop for thread-safe async calls
+    loop = asyncio.get_running_loop()
+
     # Run task in thread
     def run_task():
-        return_code = runner.run_task(task, lambda line: context.application.create_task(send_output(line)))
+        return_code = runner.run_task(task, lambda line: asyncio.run_coroutine_threadsafe(send_output(line), loop))
 
         if return_code == 0:
-            context.application.create_task(flush_buffer())
-            context.application.create_task(send_output("✅ Task finished successfully"))
+            asyncio.run_coroutine_threadsafe(flush_buffer(), loop)
+            asyncio.run_coroutine_threadsafe(send_output("✅ Task finished successfully"), loop)
         else:
-            context.application.create_task(flush_buffer())
-            context.application.create_task(send_output(f"⚠️ Task finished with code: {return_code}"))
+            asyncio.run_coroutine_threadsafe(flush_buffer(), loop)
+            asyncio.run_coroutine_threadsafe(send_output(f"⚠️ Task finished with code: {return_code}"), loop)
 
     current_task_thread = threading.Thread(target=run_task)
     current_task_thread.start()
