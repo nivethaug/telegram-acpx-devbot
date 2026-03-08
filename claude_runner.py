@@ -5,6 +5,17 @@ import subprocess
 import os
 from config import ACPX_CLAUDE_PATH, WORKSPACE_DIR, MAX_MESSAGE_LENGTH
 
+# Patterns to filter out from ACPX output (telemetry noise)
+NOISE_PATTERNS = [
+    "jsonrpc",
+    "session/update",
+    "usage_update",
+    "invalid params",
+    "invalid input",
+    "error handling notification",
+    "end_turn",
+]
+
 
 class ClaudeRunner:
     """Runner for ACPX Claude tasks"""
@@ -47,12 +58,26 @@ class ClaudeRunner:
                     break
 
                 line = line.rstrip('\n\r')
-                if line:  # Only send non-empty lines
-                    # Truncate if too long
-                    if len(line) > MAX_MESSAGE_LENGTH:
-                        line = line[:MAX_MESSAGE_LENGTH] + "..."
 
-                    update_callback(line)
+                # Skip empty lines
+                if not line:
+                    continue
+
+                # Skip telemetry noise
+                clean = line.lower()
+                if any(pattern in clean for pattern in NOISE_PATTERNS):
+                    continue
+
+                # Skip [done] markers
+                if clean.startswith("[done]"):
+                    continue
+
+                # Truncate if too long (Telegram limit: 4096 chars, use 3500 to be safe)
+                if len(line) > 3500:
+                    line = line[:3500] + "..."
+
+                # Send clean line to Telegram
+                update_callback(line)
 
             # Wait for process to complete
             return_code = self.process.wait()
