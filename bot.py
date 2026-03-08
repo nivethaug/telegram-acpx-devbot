@@ -101,7 +101,8 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             output_buffer.clear()
 
     # Get the event loop for thread-safe async calls
-    loop = asyncio.get_running_loop()
+    # Use asyncio.get_event_loop() which is more robust than get_running_loop()
+    loop = asyncio.get_event_loop()
 
     # Run task in thread
     def run_task():
