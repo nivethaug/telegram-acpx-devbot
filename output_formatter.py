@@ -152,6 +152,11 @@ class OutputFormatter:
             stripped = line.strip()
             line_lower = stripped.lower()
 
+            # Immediately skip single-character brace/bracket/paren lines
+            # This catches stray } { [ ] ( ) characters that slip through
+            if stripped in ['{', '}', '[', ']', '(', ')']:
+                continue
+
             # Detect start of JSON object
             if stripped == '{':
                 brace_depth += 1
