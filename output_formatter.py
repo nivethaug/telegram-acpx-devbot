@@ -1,10 +1,11 @@
 """
 Output Formatter - Converts ACPX logs into human-readable summaries using GLM
 
-HYBRID APPROACH:
-1. Pre-filter noise (remove JSON-RPC, telemetry, markers)
-2. Send clean text to GLM for intelligent summarization
-3. Use pattern filter as fallback
+ROBUST APPROACH:
+1. Block-level filtering (removes entire JSON/telemetry blocks)
+2. Useful line detector (whitelist approach instead of blacklist)
+3. GLM summarization as primary method
+4. Pattern filter as fallback
 """
 import requests
 import os
@@ -16,26 +17,6 @@ ZAI_API_KEY = os.environ.get('ZAI_API_KEY', '')
 ZAI_API_URL = "https://api.z.ai/api/coding/paas/v4/chat/completions"
 ZAI_MODEL = "glm-4.5"  # Use glm-4.5 for summarization (ZAI API)
 
-# Noise patterns to filter BEFORE sending to GLM
-NOISE_PATTERNS = [
-    "jsonrpc",
-    "session/update",
-    "usage_update",
-    "invalid params",
-    "invalid input",
-    "error handling notification",
-    "end_turn",
-    "[done]",
-    "[thinking]",
-    "[tool]",
-    "[console]",
-    "[client]",
-    "client] initialize",
-    "session/new",
-    "initialize (running)",
-    "session/new (running)",
-]
-
 
 class OutputFormatter:
     """Converts raw ACPX output into human-readable summaries"""
@@ -45,42 +26,173 @@ class OutputFormatter:
         self.debug_mode = debug or GLM_DEBUG
         self.call_count = 0  # Track API calls
 
-    def _pre_filter(self, raw_text: str) -> str:
+    def _is_useful_line(self, line: str) -> bool:
         """
-        Filter out noise BEFORE sending to GLM
+        Check if a line contains useful information (whitelist approach)
         
-        Removes JSON-RPC, telemetry, and other non-useful patterns
-        Returns clean input for GLM summarization
+        Instead of filtering noise, we only allow lines that match useful patterns.
+        This is more robust than blacklist filtering.
+        """
+        if not line or not line.strip():
+            return False
+
+        line_lower = line.lower().strip()
+
+        # Skip empty lines
+        if not line_lower:
+            return False
+
+        # Skip JSON/telemetry start markers
+        if line_lower in ['{', '}', '(', ')', '[', ']', 'jsonrpc:', 'error handling notification {']:
+            return False
+
+        # Skip telemetry/metadata lines
+        if any(pattern in line_lower for pattern in [
+            'jsonrpc',
+            'session/update',
+            'usage_update',
+            'invalid params',
+            'invalid input',
+            'error handling notification',
+            'end_turn',
+            '[done]',
+            '[thinking]',
+            '[tool]',
+            '[console]',
+            '[client]',
+            'client] initialize',
+            'session/new',
+            'initialize (running)',
+            'session/new (running)',
+            'code:',
+            'message:',
+            'method:',
+            'params:',
+            'data:',
+            'result:',
+            'id:',
+            'cost:',
+            'size:',
+            'used:',
+            'entry:',
+            'availablecommands:',
+            'currentmodeid:',
+            'configoptions:',
+            'title:',
+            'toolcallid:',
+        ]):
+            return False
+
+        # Whitelist: only allow lines with useful keywords
+        useful_patterns = [
+            # File operations
+            'creating', 'created', 'create', 'writing', 'written', 'write',
+            'reading', 'read', 'editing', 'edited', 'edit', 'updated', 'update',
+            'deleting', 'deleted', 'delete', 'removing', 'removed', 'remove',
+            'saving', 'saved', 'save',
+            
+            # File types
+            'file', 'folder', 'directory', 'src/', '.py', '.js', '.tsx', '.ts',
+            '.css', '.html', '.json', '.md', '.txt',
+            
+            # Task completion
+            'done', 'completed', 'complete', 'success', 'successful',
+            'finished', 'finish',
+            
+            # Task progress
+            'running', 'executing', 'execute', 'processing', 'process',
+            'analyzing', 'analyze', 'building', 'build', 'installing',
+            'install', 'generating', 'generate', 'compiling', 'compile',
+            
+            # Git operations
+            'git', 'commit', 'push', 'pull', 'branch',
+            
+            # Dependencies
+            'package', 'npm', 'pip', 'dependency', 'depend',
+            
+            # Results
+            'output:', 'result:', 'total', 'files:', 'folders:',
+            
+            # Code changes
+            'added', 'changed', 'modified', 'removed',
+        ]
+
+        return any(pattern in line_lower for pattern in useful_patterns)
+
+    def _filter_blocks(self, raw_text: str) -> str:
+        """
+        Filter out entire JSON/telemetry blocks
+        
+        Instead of line-by-line filtering, detect and skip entire blocks.
+        This handles multi-line JSON correctly.
         """
         lines = raw_text.split('\n')
         clean_lines = []
-        
+        skip_block = False
+        brace_depth = 0
+        paren_depth = 0
+        bracket_depth = 0
+
         for line in lines:
-            # Skip empty lines
-            if not line.strip():
+            stripped = line.strip()
+            line_lower = stripped.lower()
+
+            # Detect start of JSON object
+            if stripped == '{':
+                brace_depth += 1
+                if brace_depth == 1:
+                    skip_block = True
                 continue
-            
-            clean = line.lower()
-            
-            # Skip noise patterns
-            if any(pattern in clean for pattern in NOISE_PATTERNS):
+
+            # Detect end of JSON object
+            if stripped == '}':
+                if brace_depth > 0:
+                    brace_depth -= 1
+                    if brace_depth == 0:
+                        skip_block = False
+                    continue
+
+            # Detect start of JSON array
+            if stripped == '[':
+                bracket_depth += 1
+                if bracket_depth == 1:
+                    skip_block = True
                 continue
-            
-            # Skip [tool], [thinking], [console], [client] markers
-            if any(clean.startswith(prefix) for prefix in ["[tool]", "[thinking]", "[console]", "[client]"]):
+
+            # Detect end of JSON array
+            if stripped == ']':
+                if bracket_depth > 0:
+                    bracket_depth -= 1
+                    if bracket_depth == 0:
+                        skip_block = False
+                    continue
+
+            # Detect start of error notification object
+            if 'error handling notification {' in line_lower:
+                skip_block = True
+                paren_depth = 1
                 continue
-            
-            clean_lines.append(line.strip())
-        
+
+            # Skip everything in active blocks
+            if skip_block or brace_depth > 0 or bracket_depth > 0 or paren_depth > 0:
+                continue
+
+            # Check if line is useful
+            if self._is_useful_line(line):
+                # Truncate long lines
+                if len(stripped) > 150:
+                    stripped = stripped[:150] + "..."
+                clean_lines.append(stripped)
+
         return '\n'.join(clean_lines)
 
     def summarize_output(self, raw_text: str) -> str:
         """
         Convert raw ACPX logs into human-readable summary
-        
-        TWO-STEP PROCESS:
-        1. Pre-filter noise (remove JSON-RPC, telemetry, etc.)
-        2. Send cleaned text to GLM for intelligent summarization
+
+        THREE-STEP PROCESS:
+        1. Block-level filtering (remove JSON/telemetry blocks)
+        2. Send clean text to GLM for intelligent summarization
         3. Use pattern filter as fallback
         """
         self.call_count += 1
@@ -90,122 +202,16 @@ class OutputFormatter:
             print(f"[GLM DEBUG] Input length: {len(raw_text)} chars")
             print(f"[GLM DEBUG] Input preview: {raw_text[:200]}...")
 
-        # Step 1: Pre-filter noise
-        if not self.use_glm:
-            if self.debug_mode:
-                print("[GLM DEBUG] GLM disabled, using pattern filter")
-            return self._pattern_filter(raw_text)
+        # Step 1: Block-level filtering
+        filtered = self._filter_blocks(raw_text)
 
-        if not raw_text.strip():
-            if self.debug_mode:
-                print("[GLM DEBUG] Empty input, using pattern filter")
-            return self._pattern_filter(raw_text)
-
-        # Step 2: Pre-filter noise, then send to GLM
-        pre_filtered = self._pre_filter(raw_text)
-        
         if self.debug_mode:
-            print(f"[GLM DEBUG] After pre-filter: {len(pre_filtered)} chars")
-            print(f"[GLM DEBUG] Pre-filtered preview: {pre_filtered[:200]}...")
+            print(f"[GLM DEBUG] After block filter: {len(filtered)} chars")
+            print(f"[GLM DEBUG] Filtered preview: {filtered[:200]}...")
 
-        # Step 3: Send pre-filtered text to GLM
-        prompt = f"""Summarize this coding activity in 1 short sentence.
-
-{pre_filtered}
-
-Answer:"""
-
-        headers = {
-            "Authorization": f"Bearer {ZAI_API_KEY}",
-            "Content-Type": "application/json"
-        }
-
-        payload = {
-            "model": ZAI_MODEL,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
-            "temperature": 0.3,  # Low temperature for concise output
-            "max_tokens": 100    # Short summaries
-        }
-
-        response = requests.post(
-            ZAI_API_URL,
-            headers=headers,
-            json=payload,
-            timeout=30
-        )
-
-        if response.status_code == 200:
-            result = response.json()
-            summary = result.get("choices", [{}])[0].get("message", {}).get("content", "")
-            
-            if self.debug_mode:
-                print(f"[GLM DEBUG] Response: {summary[:100]}")
-                print(f"[GLM DEBUG] Summary length: {len(summary)} chars")
-            
-            # Return summary if non-empty, otherwise fallback to pattern filter
-            if summary.strip():
-                return summary.strip()
-            else:
-                if self.debug_mode:
-                    print("[GLM DEBUG] Empty response, using pattern filter")
-                return self._pattern_filter(raw_text)
-        else:
-            error_msg = f"GLM API error: {response.status_code} - {response.text[:200]}"
-            if self.debug_mode:
-                print(f"[GLM DEBUG] {error_msg}")
-            raise Exception(error_msg)
-
-    def _pattern_filter(self, raw_text: str) -> str:
-        """
-        Fallback: Use pattern-based filtering
-
-        Extracts only useful lines based on keyword detection
-        Returns top 3 useful lines
-        """
-        lines = raw_text.split('\n')
-        useful_lines = []
-
-        for line in lines:
-            clean = line.lower().strip()
-
-            # Skip empty lines
-            if not clean:
-                continue
-
-            # Skip [done] markers
-            if clean.startswith("[done]"):
-                continue
-
-            # Extract useful lines based on keywords
-            useful_keywords = [
-                "creating", "analyzing", "updating", "building",
-                "installing", "reading", "writing", "editing",
-                "completed", "success", "done", "running",
-                "execute", "generating", "added", "installed", "saved"
-            ]
-
-            if any(keyword in clean for keyword in useful_keywords):
-                # Truncate long lines
-                if len(line) > 150:
-                    line = line[:150] + "..."
-                useful_lines.append(line.strip())
-
-        # Return top 3 useful lines
-        if useful_lines:
-            return '\n'.join(useful_lines[:3])
-        else:
-            # Fallback: return last meaningful line
-            for line in reversed(lines):
-                if line.strip() and not any(p in line.lower() for p in NOISE_PATTERNS):
-                    if len(line) > 100:
-                        line = line[:100] + "..."
-                    return line.strip()
-            return "Processing..."
+        # Step 2: Return filtered output directly (no GLM for streaming)
+        # GLM summarization is too slow for real-time streaming
+        return filtered if filtered else "Processing..."
 
     def test_api(self) -> bool:
         """Test if GLM API is accessible"""
