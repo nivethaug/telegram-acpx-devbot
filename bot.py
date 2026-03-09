@@ -9,7 +9,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import threading
 
-from config import TELEGRAM_BOT_TOKEN, ALLOWED_USER_IDS, TELEGRAM_BUFFER_SIZE, USE_GLM, WORKSPACE_DIR
+from config import TELEGRAM_BOT_TOKEN, ALLOWED_USER_IDS, TELEGRAM_BUFFER_SIZE, USE_GLM, WORKSPACE_DIR, PROJECT_ROOT
 from claude_runner import ClaudeRunner
 from server_tools import get_server_status
 
@@ -29,10 +29,18 @@ def is_user_allowed(user_id):
 def improve_task_command(task: str) -> str:
     """
     Convert simple commands to clear AI instructions
-    
+
     This improves AI response quality by making prompts more explicit.
+    Also ensures absolute paths for bot source file edits.
     """
     task_lower = task.lower().strip()
+
+    # Replace ~ with PROJECT_ROOT for bot file edits
+    if '~/' in task or 'telegram-acpx-devbot' in task:
+        task = task.replace('~/', f'{PROJECT_ROOT}/')
+        # Ensure we use the full absolute path for bot files
+        if '/telegram-acpx-devbot/' in task and not task.startswith('/'):
+            task = task.replace('/telegram-acpx-devbot/', f'{PROJECT_ROOT}/')
 
     # Simple file listing
     if task_lower in ['list files', 'ls', 'ls -la', 'list', 'files']:
@@ -62,7 +70,7 @@ def improve_task_command(task: str) -> str:
     if task_lower in ['build', 'run build']:
         return "Build the project and fix any errors."
 
-    # Default: return original task
+    # Default: return original task (with path fixes applied)
     return task
 
 
