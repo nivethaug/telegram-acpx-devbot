@@ -31,6 +31,7 @@ def improve_task_command(task: str) -> str:
     Convert simple commands to clear AI instructions
 
     This improves AI response quality by making prompts more explicit.
+    Uses tool-style language to ensure ACPX executes commands (not just thinks).
     Also ensures absolute paths for bot source file edits.
     """
     task_lower = task.lower().strip()
@@ -42,33 +43,44 @@ def improve_task_command(task: str) -> str:
         if '/telegram-acpx-devbot/' in task and not task.startswith('/'):
             task = task.replace('/telegram-acpx-devbot/', f'{PROJECT_ROOT}/')
 
-    # Simple file listing
+    # Simple file listing - USE TOOL TRIGGER
     if task_lower in ['list files', 'ls', 'ls -la', 'list', 'files']:
-        return "List all files and directories in the current project folder."
+        return "Use the terminal to run `ls -la` in the project directory and list all files and folders."
 
-    # Show structure
+    # Show structure - USE TOOL TRIGGER
     if task_lower in ['show structure', 'tree', 'structure', 'show project structure']:
-        return "Show the complete directory structure of the current project."
+        return "Use the terminal to run `tree` or `find . -type f -o -type d` to show the complete directory structure."
 
-    # Create file
+    # Create file - USE TOOL TRIGGER
     if task_lower.startswith('create file'):
-        return f"{task} and add some initial content."
+        # Extract filename if present
+        if 'create file ' in task_lower:
+            filename = task[len('create file '):].strip()
+            return f"Use the file editor to create a new file named `{filename}` in the project directory."
+        return f"{task} - Use the file editor to create it."
 
-    # Edit file
+    # Edit file - USE TOOL TRIGGER
     if task_lower.startswith('edit file'):
-        return f"{task} - show the current content first."
+        # Extract filename if present
+        if 'edit file ' in task_lower:
+            filename = task[len('edit file '):].strip()
+            return f"Use the file editor to open `{filename}`, read its current content, then make the requested changes."
+        return f"{task} - Use the file editor to modify it."
 
-    # Read file
+    # Read file - USE TOOL TRIGGER
     if task_lower.startswith('read'):
-        return f"{task} - display the complete file content."
+        if 'read ' in task_lower:
+            filename = task[len('read '):].strip()
+            return f"Use the file editor to read and display the complete content of `{filename}`."
+        return f"{task} - Use the file editor to display it."
 
-    # Run tests
+    # Run tests - USE TOOL TRIGGER
     if 'test' in task_lower and len(task_lower) < 20:
-        return f"{task} - run all tests and show the results."
+        return "Use the terminal to run the test command (npm test, python -m pytest, etc.) and show the results."
 
-    # Build
+    # Build - USE TOOL TRIGGER
     if task_lower in ['build', 'run build']:
-        return "Build the project and fix any errors."
+        return "Use the terminal to run the build command (npm run build, python setup.py build, etc.) and fix any errors."
 
     # Default: return original task (with path fixes applied)
     return task
