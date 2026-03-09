@@ -9,7 +9,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import threading
 
-from config import TELEGRAM_BOT_TOKEN, ALLOWED_USER_IDS, TELEGRAM_BUFFER_SIZE, USE_GLM
+from config import TELEGRAM_BOT_TOKEN, ALLOWED_USER_IDS, TELEGRAM_BUFFER_SIZE, USE_GLM, WORKSPACE_DIR
 from claude_runner import ClaudeRunner
 from server_tools import get_server_status
 
@@ -145,6 +145,27 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("ℹ️ No task is currently running")
 
 
+async def workspace_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /workspace command"""
+    if not is_user_allowed(update.effective_user.id):
+        await update.message.reply_text("❌ You are not authorized to use this bot.")
+        return
+
+    workspace_info = f"""📁 **Current Workspace**
+
+📂 Path: `{WORKSPACE_DIR}`
+
+**Available Commands:**
+• `/dev list files` - Show workspace contents
+• `/dev show structure` - Show project structure
+• `/dev create file <name>` - Create a new file
+• `/dev edit file <name>` - Edit an existing file
+
+*All tasks run inside this workspace.*"""
+
+    await update.message.reply_text(workspace_info, parse_mode='Markdown')
+
+
 async def unknown_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle unknown messages"""
     if not is_user_allowed(update.effective_user.id):
@@ -156,6 +177,7 @@ async def unknown_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 **Available Commands:**
 /dev `<task>` - Run a development task
 /server - Show server status
+/workspace - Show current workspace
 /stop - Stop running task"""
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
@@ -181,6 +203,7 @@ def main():
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("dev", dev_command))
     application.add_handler(CommandHandler("server", server_command))
+    application.add_handler(CommandHandler("workspace", workspace_command))
     application.add_handler(CommandHandler("stop", stop_command))
     application.add_handler(MessageHandler(filters.COMMAND, unknown_message))
 

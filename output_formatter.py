@@ -30,6 +30,10 @@ NOISE_PATTERNS = [
     "[tool]",
     "[console]",
     "[client]",
+    "client] initialize",
+    "session/new",
+    "initialize (running)",
+    "session/new (running)",
 ]
 
 
