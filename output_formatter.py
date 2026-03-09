@@ -26,31 +26,34 @@ class OutputFormatter:
         self.debug_mode = debug or GLM_DEBUG
         self.call_count = 0  # Track API calls
 
-    def _is_useful_line(self, line: str) -> bool:
+    def _is_inline_noise(self, line: str) -> bool:
         """
-        Check if a line contains useful information (whitelist approach)
+        Check if a line is inline telemetry/noise
         
-        Instead of filtering noise, we only allow lines that match useful patterns.
-        This is more robust than blacklist filtering.
+        Handles single-line structured logs like:
+        sessionUpdate: { _errors: [Array] },
         """
         if not line or not line.strip():
-            return False
+            return True  # Skip empty lines
 
         line_lower = line.lower().strip()
 
         # Skip empty lines
         if not line_lower:
-            return False
+            return True
 
-        # Skip JSON/telemetry start markers
+        # Skip JSON/telemetry start/end markers
         if line_lower in ['{', '}', '(', ')', '[', ']', 'jsonrpc:', 'error handling notification {']:
-            return False
+            return True
 
-        # Skip telemetry/metadata lines
+        # Skip inline structured logs
         if any(pattern in line_lower for pattern in [
-            'jsonrpc',
+            'sessionupdate:',
             'session/update',
             'usage_update',
+            '_errors:',
+            '[array]',
+            '[object]',
             'invalid params',
             'invalid input',
             'error handling notification',
@@ -80,8 +83,20 @@ class OutputFormatter:
             'configoptions:',
             'title:',
             'toolcallid:',
+            'jsonrpc:',
+            'jsonrpc:',
         ]):
-            return False
+            return True
+
+        return False
+
+    def _is_useful_line(self, line: str) -> bool:
+        """
+        Check if a line contains useful information (whitelist approach)
+
+        Instead of filtering noise, we only allow lines that match useful patterns.
+        This is more robust than blacklist filtering.
+        """
 
         # Whitelist: only allow lines with useful keywords
         useful_patterns = [
@@ -175,6 +190,10 @@ class OutputFormatter:
 
             # Skip everything in active blocks
             if skip_block or brace_depth > 0 or bracket_depth > 0 or paren_depth > 0:
+                continue
+
+            # Skip inline noise (single-line telemetry)
+            if self._is_inline_noise(line):
                 continue
 
             # Check if line is useful

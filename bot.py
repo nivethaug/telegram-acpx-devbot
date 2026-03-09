@@ -26,6 +26,46 @@ def is_user_allowed(user_id):
     return user_id in ALLOWED_USER_IDS
 
 
+def improve_task_command(task: str) -> str:
+    """
+    Convert simple commands to clear AI instructions
+    
+    This improves AI response quality by making prompts more explicit.
+    """
+    task_lower = task.lower().strip()
+
+    # Simple file listing
+    if task_lower in ['list files', 'ls', 'ls -la', 'list', 'files']:
+        return "List all files and directories in the current project folder."
+
+    # Show structure
+    if task_lower in ['show structure', 'tree', 'structure', 'show project structure']:
+        return "Show the complete directory structure of the current project."
+
+    # Create file
+    if task_lower.startswith('create file'):
+        return f"{task} and add some initial content."
+
+    # Edit file
+    if task_lower.startswith('edit file'):
+        return f"{task} - show the current content first."
+
+    # Read file
+    if task_lower.startswith('read'):
+        return f"{task} - display the complete file content."
+
+    # Run tests
+    if 'test' in task_lower and len(task_lower) < 20:
+        return f"{task} - run all tests and show the results."
+
+    # Build
+    if task_lower in ['build', 'run build']:
+        return "Build the project and fix any errors."
+
+    # Default: return original task
+    return task
+
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command"""
     if not is_user_allowed(update.effective_user.id):
@@ -67,6 +107,9 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     task = ' '.join(context.args)
+
+    # Improve task command for better AI response
+    task = improve_task_command(task)
 
     # Send initial message
     status_message = await update.message.reply_text(f"🚀 **Task Started**\n\n```\n{task}\n```", parse_mode='Markdown')
