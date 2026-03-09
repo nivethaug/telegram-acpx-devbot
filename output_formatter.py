@@ -1,18 +1,22 @@
 """
 Output Formatter - Converts ACPX logs into human-readable summaries using GLM
+
+HYBRID APPROACH:
+1. Pre-filter noise (remove JSON-RPC, telemetry, markers)
+2. Send clean text to GLM for intelligent summarization
+3. Use pattern filter as fallback
 """
 import requests
-import json
 import os
 from typing import Optional
 
 # GLM/ZAI API Configuration
 GLM_DEBUG = os.environ.get('GLM_DEBUG', 'False').lower() in ('true', '1', 'yes')
 ZAI_API_KEY = os.environ.get('ZAI_API_KEY', '')
-ZAI_API_URL = "https://api.z.ai/api/coding/paas/v4/chat/completions"  # ZAI API endpoint
+ZAI_API_URL = "https://api.z.ai/api/coding/paas/v4/chat/completions"
 ZAI_MODEL = "glm-4.5"  # Use glm-4.5 for summarization (ZAI API)
 
-# Fallback patterns if GLM API is unavailable
+# Noise patterns to filter BEFORE sending to GLM
 NOISE_PATTERNS = [
     "jsonrpc",
     "session/update",
@@ -21,55 +25,91 @@ NOISE_PATTERNS = [
     "invalid input",
     "error handling notification",
     "end_turn",
+    "[done]",
+    "[thinking]",
+    "[tool]",
+    "[console]",
+    "[client]",
 ]
 
 
 class OutputFormatter:
     """Converts raw ACPX output into human-readable summaries"""
 
-    def __init__(self, use_glm=True):
+    def __init__(self, use_glm=True, debug=False):
         self.use_glm = use_glm and ZAI_API_KEY
-        self.debug_mode = True  # Enable debug logging for GLM
+        self.debug_mode = debug or GLM_DEBUG
         self.call_count = 0  # Track API calls
+
+    def _pre_filter(self, raw_text: str) -> str:
+        """
+        Filter out noise BEFORE sending to GLM
+        
+        Removes JSON-RPC, telemetry, and other non-useful patterns
+        Returns clean input for GLM summarization
+        """
+        lines = raw_text.split('\n')
+        clean_lines = []
+        
+        for line in lines:
+            # Skip empty lines
+            if not line.strip():
+                continue
+            
+            clean = line.lower()
+            
+            # Skip noise patterns
+            if any(pattern in clean for pattern in NOISE_PATTERNS):
+                continue
+            
+            # Skip [tool], [thinking], [console], [client] markers
+            if any(clean.startswith(prefix) for prefix in ["[tool]", "[thinking]", "[console]", "[client]"]):
+                continue
+            
+            clean_lines.append(line.strip())
+        
+        return '\n'.join(clean_lines)
 
     def summarize_output(self, raw_text: str) -> str:
         """
         Convert raw ACPX logs into human-readable summary
-
-        Args:
-            raw_text: Raw ACPX output lines
-
-        Returns:
-            Human-readable summary (1-3 lines)
+        
+        TWO-STEP PROCESS:
+        1. Pre-filter noise (remove JSON-RPC, telemetry, etc.)
+        2. Send cleaned text to GLM for intelligent summarization
+        3. Use pattern filter as fallback
         """
-        # Try GLM summarization first
-        if self.use_glm:
-            try:
-                return self._glm_summarize(raw_text)
-            except Exception as e:
-                print(f"GLM API failed: {e}, using pattern filtering")
-                return self._pattern_filter(raw_text)
-        else:
-            # Use pattern-based filtering
+        self.call_count += 1
+
+        if self.debug_mode:
+            print(f"[GLM DEBUG] Call #{self.call_count}")
+            print(f"[GLM DEBUG] Input length: {len(raw_text)} chars")
+            print(f"[GLM DEBUG] Input preview: {raw_text[:200]}...")
+
+        # Step 1: Pre-filter noise
+        if not self.use_glm:
+            if self.debug_mode:
+                print("[GLM DEBUG] GLM disabled, using pattern filter")
             return self._pattern_filter(raw_text)
 
-    def _glm_summarize(self, raw_text: str) -> str:
-        """Call GLM API for summarization"""
-        prompt = f"""Convert the following AI coding agent logs into a short human-readable progress update.
+        if not raw_text.strip():
+            if self.debug_mode:
+                print("[GLM DEBUG] Empty input, using pattern filter")
+            return self._pattern_filter(raw_text)
 
-Remove:
-- JSON-RPC blocks
-- telemetry logs
-- session updates
-- invalid params messages
-- error handling notifications
+        # Step 2: Pre-filter noise, then send to GLM
+        pre_filtered = self._pre_filter(raw_text)
+        
+        if self.debug_mode:
+            print(f"[GLM DEBUG] After pre-filter: {len(pre_filtered)} chars")
+            print(f"[GLM DEBUG] Pre-filtered preview: {pre_filtered[:200]}...")
 
-Return only useful development progress in 1-3 short lines.
+        # Step 3: Send pre-filtered text to GLM
+        prompt = f"""Summarize this coding activity in 1 short sentence.
 
-Logs:
-{raw_text}
+{pre_filtered}
 
-Summary:"""
+Answer:"""
 
         headers = {
             "Authorization": f"Bearer {ZAI_API_KEY}",
@@ -103,9 +143,18 @@ Summary:"""
                 print(f"[GLM DEBUG] Response: {summary[:100]}")
                 print(f"[GLM DEBUG] Summary length: {len(summary)} chars")
             
-            return summary.strip()
+            # Return summary if non-empty, otherwise fallback to pattern filter
+            if summary.strip():
+                return summary.strip()
+            else:
+                if self.debug_mode:
+                    print("[GLM DEBUG] Empty response, using pattern filter")
+                return self._pattern_filter(raw_text)
         else:
-            raise Exception(f"GLM API error: {response.status_code} - {response.text}")
+            error_msg = f"GLM API error: {response.status_code} - {response.text[:200]}"
+            if self.debug_mode:
+                print(f"[GLM DEBUG] {error_msg}")
+            raise Exception(error_msg)
 
     def _pattern_filter(self, raw_text: str) -> str:
         """
@@ -124,16 +173,8 @@ Summary:"""
             if not clean:
                 continue
 
-            # Skip noise patterns
-            if any(pattern in clean for pattern in NOISE_PATTERNS):
-                continue
-
             # Skip [done] markers
             if clean.startswith("[done]"):
-                continue
-
-            # Skip tool indicators (keep only action lines)
-            if clean.startswith("[tool]") or clean.startswith("[thinking]"):
                 continue
 
             # Extract useful lines based on keywords
@@ -141,29 +182,24 @@ Summary:"""
                 "creating", "analyzing", "updating", "building",
                 "installing", "reading", "writing", "editing",
                 "completed", "success", "done", "running",
-                "execute", "generating", "added", "added",
-                "file", "component", "page", "style",
+                "execute", "generating", "added", "installed", "saved"
             ]
 
             if any(keyword in clean for keyword in useful_keywords):
-                # Truncate long lines to keep summaries short
-                if len(line) > 80:
-                    line = line[:80] + "..."
+                # Truncate long lines
+                if len(line) > 150:
+                    line = line[:150] + "..."
                 useful_lines.append(line.strip())
 
-            # Stop after collecting 3 useful lines
-            if len(useful_lines) >= 3:
-                break
-
-        # Return collected lines
+        # Return top 3 useful lines
         if useful_lines:
-            return '\n'.join(useful_lines)
+            return '\n'.join(useful_lines[:3])
         else:
             # Fallback: return last meaningful line
             for line in reversed(lines):
                 if line.strip() and not any(p in line.lower() for p in NOISE_PATTERNS):
-                    if len(line) > 80:
-                        line = line[:80] + "..."
+                    if len(line) > 100:
+                        line = line[:100] + "..."
                     return line.strip()
             return "Processing..."
 
@@ -173,8 +209,8 @@ Summary:"""
             return False
 
         try:
-            test_prompt = "Say 'API working' in 1 word."
-            return self._glm_summarize(test_prompt) == "API working"
+            test_prompt = "Say hello"
+            return self._glm_summarize(test_prompt) == "Hello there!" or "Hi there!"
         except Exception as e:
             print(f"GLM API test failed: {e}")
             return False

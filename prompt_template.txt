@@ -1,0 +1,6 @@
+Summarize this coding activity in 1 short sentence.
+
+Logs:
+{raw_text}
+
+Answer:

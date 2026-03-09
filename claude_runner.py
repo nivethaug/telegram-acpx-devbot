@@ -74,6 +74,7 @@ class ClaudeRunner:
                 if should_summarize:
                     # Generate summary using GLM or pattern filtering
                     raw_text = '\n'.join(self.output_buffer)
+                    
                     try:
                         summary = self.formatter.summarize_output(raw_text)
                         update_callback(summary)
