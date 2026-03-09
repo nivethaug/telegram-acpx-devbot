@@ -1,0 +1,17 @@
+    # Get the event loop for thread-safe async calls
+    # Use asyncio.get_event_loop() which is more robust than get_running_loop()
+    loop = asyncio.get_event_loop()
+
+    # Run task in thread
+    def run_task():
+        return_code = runner.run_task(task, lambda line: asyncio.run_coroutine_threadsafe(send_output(line), loop))
+
+        if return_code == 0:
+            asyncio.run_coroutine_threadsafe(flush_buffer(), loop)
+            asyncio.run_coroutine_threadsafe(send_output("✅ Task finished successfully"), loop)
+        else:
+            asyncio.run_coroutine_threadsafe(flush_buffer(), loop)
+            asyncio.run_coroutine_threadsafe(send_output(f"⚠️ Task finished with code: {return_code}"), loop)
+
+    current_task_thread = threading.Thread(target=run_task)
+    current_task_thread.start()

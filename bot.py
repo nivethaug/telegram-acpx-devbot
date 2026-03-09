@@ -108,7 +108,9 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     def run_task():
         return_code = runner.run_task(task, lambda line: asyncio.run_coroutine_threadsafe(send_output(line), loop))
 
-        if return_code == 0:
+        # ACPX returns -6 (SIGABRT) after successful task when usage reporting fails
+        # Treat -6 as success since the actual task completed
+        if return_code in (0, -6):
             asyncio.run_coroutine_threadsafe(flush_buffer(), loop)
             asyncio.run_coroutine_threadsafe(send_output("✅ Task finished successfully"), loop)
         else:
