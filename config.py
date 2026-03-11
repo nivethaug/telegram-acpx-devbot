@@ -4,10 +4,11 @@ import os
 
 # Project paths
 PROJECT_ROOT = "/root/telegram-acpx-devbot"  # Bot source code directory
-WORKSPACE_DIR = "/root/workspace/frontend-test"  # AI agent working directory
+WORKSPACE_DIR = "/root/projects"  # AI agent working directory (multi-project support)
 
-# Telegram configuration
-TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '8754771378:AAFqdZNwYc8JbZanNy901IQr6lFmJs1gtm4')
+# Telegram configuration - Hardcoded to avoid conflicts with OpenClaw bot
+# This bot uses a DIFFERENT token from the main OpenClaw bot
+TELEGRAM_BOT_TOKEN = '8754771378:AAFqdZNwYc8JbZanNy901IQr6lFmJs1gtm4'  # DEV BOT TOKEN
 ALLOWED_USER_IDS = []
 
 # ACPX configuration
@@ -18,6 +19,7 @@ MAX_MESSAGE_LENGTH = 4000
 TASK_TIMEOUT = 0
 TELEGRAM_BUFFER_SIZE = 5
 USE_GLM = False
+WORKER_COUNT = 2  # Number of concurrent task workers
 
 # GLM/ZAI API configuration
 ZAI_API_KEY = ""

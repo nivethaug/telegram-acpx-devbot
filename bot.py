@@ -8,8 +8,9 @@ import asyncio
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import threading
+from queue import Queue
 
-from config import TELEGRAM_BOT_TOKEN, ALLOWED_USER_IDS, TELEGRAM_BUFFER_SIZE, USE_GLM, WORKSPACE_DIR, PROJECT_ROOT
+from config import TELEGRAM_BOT_TOKEN, ALLOWED_USER_IDS, TELEGRAM_BUFFER_SIZE, USE_GLM, WORKSPACE_DIR, PROJECT_ROOT, WORKER_COUNT
 from claude_runner import ClaudeRunner
 from server_tools import get_server_status
 
@@ -17,6 +18,10 @@ from server_tools import get_server_status
 # Global runner instance
 runner = ClaudeRunner(use_glm=USE_GLM)
 current_task_thread = None
+
+# Task queue for concurrent task execution
+task_queue = Queue()
+workers_running = False
 
 
 def is_user_allowed(user_id):
@@ -26,6 +31,43 @@ def is_user_allowed(user_id):
     return user_id in ALLOWED_USER_IDS
 
 
+def resolve_project_path(task: str) -> tuple:
+    """
+    Resolve project path from natural language task.
+
+    Converts prompts like:
+    - "build dashboard in crypto-app" -> ("/root/projects/crypto-app", "build dashboard")
+    - "fix bug in backend/api-service" -> ("/root/projects/backend/api-service", "fix bug")
+    - "create landing page" -> ("/root/projects", "create landing page")
+
+    Returns:
+        tuple: (project_path, cleaned_task)
+    """
+    base = "/root/projects"
+    words = task.split()
+
+    # Check for path patterns like "in crypto-app" or "in backend/api-service"
+    if " in " in task.lower():
+        parts = task.lower().split(" in ", 1)
+        if len(parts) == 2:
+            project = parts[1].strip().split()[0]  # Get first word after "in"
+            project_path = f"{base}/{project}"
+            # Remove project reference from task
+            cleaned_task = task.replace(f" in {project}", "", 1).replace(f" in {project.upper()}", "", 1).strip()
+            return project_path, cleaned_task
+
+    # Check for path patterns like "crypto-app/dashboard"
+    for word in words:
+        if "/" in word and not word.startswith("/"):
+            project_path = f"{base}/{word}"
+            # Remove path reference from task
+            cleaned_task = task.replace(word, "").strip()
+            return project_path, cleaned_task
+
+    # Default: use base projects directory
+    return base, task
+
+
 def improve_task_command(task: str) -> str:
     """
     Convert simple commands to clear AI instructions
@@ -33,6 +75,8 @@ def improve_task_command(task: str) -> str:
     This improves AI response quality by making prompts more explicit.
     Uses tool-style language to ensure ACPX executes commands (not just thinks).
     Also ensures absolute paths for bot source file edits.
+
+    SIMPLIFIED VERSION: Only modify paths, don't restructure natural language prompts.
     """
     task_lower = task.lower().strip()
 
@@ -83,6 +127,7 @@ def improve_task_command(task: str) -> str:
         return "Use the terminal to run the build command (npm run build, python setup.py build, etc.) and fix any errors."
 
     # Default: return original task (with path fixes applied)
+    # Don't modify natural language prompts - let ACPX interpret them
     return task
 
 
@@ -116,11 +161,6 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ You are not authorized to use this bot.")
         return
 
-    # Check if a task is already running
-    if runner.is_running:
-        await update.message.reply_text("⚠️ A task is already running. Use /stop to cancel it first.")
-        return
-
     # Get task description
     if not context.args:
         await update.message.reply_text("❌ Please provide a task.\n\nUsage: /dev <task description>")
@@ -128,26 +168,33 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     task = ' '.join(context.args)
 
-    # Improve task command for better AI response
-    task = improve_task_command(task)
+    # Resolve project path from task
+    project_path, cleaned_task = resolve_project_path(task)
 
-    # Send initial message
-    status_message = await update.message.reply_text(f"🚀 **Task Started**\n\n```\n{task}\n```", parse_mode='Markdown')
+    # Improve task command for better AI response (only path fixes, minimal modification)
+    task = improve_task_command(cleaned_task)
+
+    # Send initial message with project info
+    project_name = project_path.replace("/root/projects/", "")
+    status_message = await update.message.reply_text(
+        f"🚀 **Task Started**\n\n📁 Project: `{project_name}`",
+        parse_mode='Markdown'
+    )
 
     # Buffer for batched streaming
     output_buffer = []
     BUFFER_SIZE = TELEGRAM_BUFFER_SIZE  # Send updates every N lines (from config)
 
-    # Define callback for batched streaming output
+    # Define callback for streaming output (DEBUG MODE - raw output)
     async def send_output(line):
         nonlocal output_buffer
         output_buffer.append(line)
-        
+
         if len(output_buffer) >= BUFFER_SIZE:
-            # Update status message with batched output
+            # Update status message with raw output
             batched_text = "\n".join(output_buffer)
             try:
-                await status_message.edit_text(f"🚀 **Task Started**\n\n```\n{task}\n\n{batched_text}```", parse_mode='Markdown')
+                await status_message.edit_text(f"🚀 Task Started\n📁 Project: `{project_name}`\n{batched_text}", parse_mode='Markdown')
             except Exception as e:
                 print(f"Error editing message: {e}")
             output_buffer.clear()
@@ -158,18 +205,17 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if output_buffer:
             batched_text = "\n".join(output_buffer)
             try:
-                await status_message.edit_text(f"🚀 **Task Started**\n\n```\n{task}\n\n{batched_text}```", parse_mode='Markdown')
+                await status_message.edit_text(f"🚀 Task Started\n📁 Project: `{project_name}`\n{batched_text}", parse_mode='Markdown')
             except Exception as e:
                 print(f"Error editing message: {e}")
             output_buffer.clear()
 
     # Get the event loop for thread-safe async calls
-    # Use asyncio.get_event_loop() which is more robust than get_running_loop()
     loop = asyncio.get_event_loop()
 
-    # Run task in thread
+    # Run task in thread with project_path
     def run_task():
-        return_code = runner.run_task(task, lambda line: asyncio.run_coroutine_threadsafe(send_output(line), loop))
+        return_code = runner.run_task(task, lambda line: asyncio.run_coroutine_threadsafe(send_output(line), loop), project_path=project_path)
 
         # ACPX returns -6 (SIGABRT) after successful task when usage reporting fails
         # Treat -6 as success since the actual task completed
@@ -214,9 +260,14 @@ async def workspace_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ You are not authorized to use this bot.")
         return
 
-    workspace_info = f"""📁 **Current Workspace**
+    workspace_info = f"""📁 **Multi-Project Workspace**
 
-📂 Path: `{WORKSPACE_DIR}`
+📂 Base Path: `{WORKSPACE_DIR}`
+
+**How to specify projects:**
+• `/dev build dashboard in crypto-app` → Creates/uses `/root/projects/crypto-app`
+• `/dev fix bug in backend/api` → Creates/uses `/root/projects/backend/api`
+• `/dev create landing page` → Uses base `/root/projects`
 
 **Available Commands:**
 • `/dev list files` - Show workspace contents
@@ -224,7 +275,7 @@ async def workspace_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • `/dev create file <name>` - Create a new file
 • `/dev edit file <name>` - Edit an existing file
 
-*All tasks run inside this workspace.*"""
+*Each task runs in its own project folder.*"""
 
     await update.message.reply_text(workspace_info, parse_mode='Markdown')
 
@@ -257,7 +308,16 @@ def main():
         print("Or edit config.py and add your token.")
         sys.exit(1)
 
+    # Debug: Print token prefix to verify correct token is being used
+    print(f"🔑 Using token starting with: {token[:10]}...")
+    if token.startswith('8166539305'):
+        print("⚠️ WARNING: Using OpenClaw main bot token! This will cause conflict!")
+    elif token.startswith('8754771378'):
+        print("✅ Using correct DEV bot token")
+
     print("🤖 Starting Telegram ACPX Dev Bot...")
+    print(f"📁 Multi-project workspace: {WORKSPACE_DIR}")
+    print(f"👥 Worker pool size: {WORKER_COUNT}")
 
     # Create application
     application = Application.builder().token(token).build()
