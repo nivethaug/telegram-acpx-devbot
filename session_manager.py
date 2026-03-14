@@ -110,6 +110,30 @@ def get_active_session(user_id: int) -> dict | None:
     return None
 
 
+def get_session_by_chat_id(chat_id: int) -> dict | None:
+    """
+    Get most recent session for a chat ID (doesn't require session to be running).
+
+    Args:
+        chat_id: Telegram chat ID
+
+    Returns:
+        Session dict if found, None otherwise
+    """
+    # Find all sessions for this chat_id
+    chat_sessions = []
+    for sid, sess in SESSIONS.items():
+        if sess["user_id"] == chat_id:
+            chat_sessions.append((sess["created_at"], sess))
+
+    if not chat_sessions:
+        return None
+
+    # Sort by creation time (most recent first) and return latest
+    chat_sessions.sort(key=lambda x: x[0], reverse=True)
+    return chat_sessions[0][1]  # Return session (not timestamp)
+
+
 def update_session_activity(session_id: str):
     """Update last activity timestamp"""
     if session_id in SESSIONS:

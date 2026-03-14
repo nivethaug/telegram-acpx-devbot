@@ -4,7 +4,8 @@ import os
 
 # Project paths
 PROJECT_ROOT = "/root/telegram-acpx-devbot"  # Bot source code directory
-WORKSPACE_DIR = "/root/projects"  # AI agent working directory (multi-project support)
+WORKSPACE_DIR = "/root/workspaces"  # AI agent working directory (multi-project support)
+DEFAULT_WORKSPACE = "/root/projects"  # Fallback workspace when no session exists
 
 # Telegram configuration - Hardcoded to avoid conflicts with OpenClaw bot
 # This bot uses a DIFFERENT token from the main OpenClaw bot

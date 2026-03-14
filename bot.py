@@ -11,7 +11,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 import threading
 from queue import Queue
 
-from config import TELEGRAM_BOT_TOKEN, ALLOWED_USER_IDS, TELEGRAM_BUFFER_SIZE, USE_GLM, WORKSPACE_DIR, PROJECT_ROOT, WORKER_COUNT
+from config import TELEGRAM_BOT_TOKEN, ALLOWED_USER_IDS, TELEGRAM_BUFFER_SIZE, USE_GLM, WORKSPACE_DIR, PROJECT_ROOT, WORKER_COUNT, DEFAULT_WORKSPACE
 from claude_runner import ClaudeRunner
 from server_tools import get_server_status
 import session_manager
@@ -171,29 +171,23 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     task = ' '.join(context.args)
 
     # Check for active session or create temporary one
-    user_id = update.effective_user.id
-    active_session = session_manager.get_active_session(user_id)
+    chat_id = update.effective_chat.id
+    session = session_manager.get_session_by_chat_id(chat_id)
 
-    if active_session:
-        # Use existing session's isolated workspace
-        workspace_path = os.path.join(active_session["workspace"], "repo")
-        project_display = active_session["repo_path"]
-        session_id = active_session["session_id"]
+    if session:
+        # Use existing session's isolated workspace (repo symlink)
+        workspace_path = os.path.join(session["workspace"], "repo")
+        project_display = session["repo_path"]
+        session_id = session["session_id"]
         session_type = "existing session"
+        # Mark session as active
+        session_manager.set_session_running(session_id, True)
     else:
-        # No active session - resolve project path and create temporary session
-        project_path, cleaned_task = resolve_project_path(task)
-        temp_session = session_manager.create_session(user_id, project_path)
-        if "error" in temp_session:
-            await update.message.reply_text(f"❌ {temp_session['message']}")
-            return
-        workspace_path = os.path.join(temp_session["workspace"], "repo")
-        project_display = temp_session["repo_path"]
-        session_id = temp_session["session_id"]
-        session_type = "temporary session"
-
-    # Mark session as active
-    session_manager.set_session_running(session_id, True)
+        # No session - use DEFAULT_WORKSPACE
+        workspace_path = DEFAULT_WORKSPACE
+        project_display = DEFAULT_WORKSPACE
+        session_id = "none"
+        session_type = "no session"
 
     # Send initial message with project info
     project_name = os.path.basename(project_display)
