@@ -221,13 +221,16 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             # Instead of truncating, split into multiple messages
             if len(all_text) > MAX_MESSAGE_LENGTH:
-                # Send as multiple chunks
+                # Send as multiple chunks WITH DELAY to avoid flood control
                 print(f"[DEBUG] Sending {len(all_text)} chars in chunks...")
                 for i in range(0, len(all_text), MAX_MESSAGE_LENGTH):
                     chunk = all_text[i:i+MAX_MESSAGE_LENGTH]
                     try:
                         await update.message.reply_text(f"📊 Output continuation:\n\n{chunk}")
                         print(f"[DEBUG] Sent chunk {i//MAX_MESSAGE_LENGTH + 1}")
+                        # Add delay between chunks to avoid Telegram flood control
+                        if i + MAX_MESSAGE_LENGTH < len(all_text):  # Don't delay after last chunk
+                            await asyncio.sleep(1)  # 1 second delay between chunks
                     except Exception as e:
                         print(f"Error sending chunk: {e}")
             else:
@@ -251,13 +254,16 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             # Instead of truncating, split into multiple messages
             if len(all_text) > MAX_MESSAGE_LENGTH:
-                # Send as multiple chunks
+                # Send as multiple chunks WITH DELAY to avoid flood control
                 print(f"[DEBUG] Flushing {len(all_text)} chars in chunks...")
                 for i in range(0, len(all_text), MAX_MESSAGE_LENGTH):
                     chunk = all_text[i:i+MAX_MESSAGE_LENGTH]
                     try:
                         await update.message.reply_text(f"📊 Output continuation:\n\n{chunk}")
                         print(f"[DEBUG] Flushed chunk {i//MAX_MESSAGE_LENGTH + 1}")
+                        # Add delay between chunks to avoid Telegram flood control
+                        if i + MAX_MESSAGE_LENGTH < len(all_text):  # Don't delay after last chunk
+                            await asyncio.sleep(1)  # 1 second delay between chunks
                     except Exception as e:
                         print(f"Error sending chunk: {e}")
             else:
