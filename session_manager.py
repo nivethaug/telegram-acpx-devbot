@@ -61,8 +61,7 @@ def create_session(user_id: int, project_path: str) -> dict:
     workspace_path = WORKSPACES_DIR / session_id
     workspace_path.mkdir(parents=True, exist_ok=True)
 
-    # Create subdirectories
-    (workspace_path / "repo").mkdir(exist_ok=True)
+    # Create subdirectories (repo will be a symlink, not a directory)
     (workspace_path / "logs").mkdir(exist_ok=True)
     (workspace_path / "context").mkdir(exist_ok=True)
     (workspace_path / "temp").mkdir(exist_ok=True)
