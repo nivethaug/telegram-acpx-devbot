@@ -4,6 +4,7 @@ A lightweight Telegram bot for running ACPX Claude coding tasks remotely
 """
 import os
 import sys
+import time
 import asyncio
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -11,8 +12,9 @@ import threading
 from queue import Queue
 
 from config import TELEGRAM_BOT_TOKEN, ALLOWED_USER_IDS, TELEGRAM_BUFFER_SIZE, USE_GLM, WORKSPACE_DIR, PROJECT_ROOT, WORKER_COUNT
-from claude_runner_v2 import ClaudeRunner
+from claude_runner import ClaudeRunner
 from server_tools import get_server_status
+import session_manager
 
 
 # Global runner instance
@@ -168,15 +170,37 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     task = ' '.join(context.args)
 
-    # Resolve project path from task
-    project_path, cleaned_task = resolve_project_path(task)
+    # Check for active session or create temporary one
+    user_id = update.effective_user.id
+    active_session = session_manager.get_active_session(user_id)
+
+    if active_session:
+        # Use existing session's isolated workspace
+        workspace_path = os.path.join(active_session["workspace"], "repo")
+        project_display = active_session["repo_path"]
+        session_id = active_session["session_id"]
+        session_type = "existing session"
+    else:
+        # No active session - resolve project path and create temporary session
+        project_path, cleaned_task = resolve_project_path(task)
+        temp_session = session_manager.create_session(user_id, project_path)
+        if "error" in temp_session:
+            await update.message.reply_text(f"❌ {temp_session['message']}")
+            return
+        workspace_path = os.path.join(temp_session["workspace"], "repo")
+        project_display = temp_session["repo_path"]
+        session_id = temp_session["session_id"]
+        session_type = "temporary session"
+
+    # Mark session as active
+    session_manager.set_session_running(session_id, True)
 
     # Send initial message with project info
-    project_name = project_path.replace("/root/projects/", "")
+    project_name = os.path.basename(project_display)
 
     # CRITICAL FIX #4: Save initial message object for later updates
     initial_message = await update.message.reply_text(
-        f"🚀 Task Started\n\nTask: {task}\n📁 Project: {project_name}"
+        f"🚀 Task Started\n\nTask: {task}\n📁 Project: {project_name}\n🔑 Session: {session_id} ({session_type})"
     )
 
     # Buffer for batched streaming
@@ -230,25 +254,29 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Get event loop for thread-safe async calls
     loop = asyncio.get_event_loop()
 
-    # Run task in thread with project_path
+    # Run task in thread with workspace_path
     def run_task():
         # DEBUG: Log task execution start
         print(f"[DEBUG] Starting task: {task}")
-        print(f"[DEBUG] Project path: {project_path}")
+        print(f"[DEBUG] Workspace path: {workspace_path}")
+        print(f"[DEBUG] Project display: {project_display}")
         print(f"[DEBUG] About to call runner.run_task...")
-        
+
         # Call runner.run_task with streaming callback
         try:
-            return_code = runner.run_task(task, lambda line: asyncio.run_coroutine_threadsafe(send_output(line), loop), project_path=project_path)
+            return_code = runner.run_task(task, lambda line: asyncio.run_coroutine_threadsafe(send_output(line), loop), project_path=workspace_path)
             print(f"[DEBUG] runner.run_task returned: {return_code}")
             print(f"[DEBUG] Process poll status: {runner.process.poll()}")
             print(f"[DEBUG] Runner is_running: {runner.is_running}")
         except Exception as e:
             print(f"[DEBUG] EXCEPTION in run_task: {e}")
             return_code = -1
-        
+
         # DEBUG: Log completion
         print(f"[DEBUG] Task thread finished with code: {return_code}")
+
+        # Mark session as not running
+        session_manager.set_session_running(session_id, False)
 
         # ACPX returns -6 (SIGABRT) after successful task when usage reporting fails
         # Treat -6 as success since actual task completed
@@ -319,10 +347,142 @@ async def workspace_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • `/dev show structure` - Show project structure
 • `/dev create file <name>` - Create a new file
 • `/dev edit file <name>` - Edit an existing file
+• `/session` - Manage sessions
 
 *Each task runs in its own project folder.*"""
 
     await update.message.reply_text(workspace_info, parse_mode='Markdown')
+
+
+async def session_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /session command - Manage sessions"""
+    if not is_user_allowed(update.effective_user.id):
+        await update.message.reply_text("❌ You are not authorized to use this bot.")
+        return
+
+    user_id = update.effective_user.id
+    sessions = session_manager.list_sessions(user_id)
+    active_session = session_manager.get_active_session(user_id)
+
+    if not sessions:
+        await update.message.reply_text(
+            "📦 **No active sessions**\n\n"
+            "Sessions are created automatically when you run `/dev` commands.\n\n"
+            "Use `/session create <path>` to create a persistent session.",
+            parse_mode='Markdown'
+        )
+        return
+
+    # Build session list
+    session_list = "📦 **Your Sessions**\n\n"
+
+    for sess in sessions:
+        status = "🟢 Active" if sess["running"] else "⏸️ Idle"
+        project_name = os.path.basename(sess["repo_path"])
+        created_time = int(time.time() - sess["created_at"])
+        if created_time < 60:
+            time_str = f"{created_time}s ago"
+        elif created_time < 3600:
+            time_str = f"{created_time // 60}m ago"
+        else:
+            time_str = f"{created_time // 3600}h ago"
+
+        is_active = " (current)" if sess == active_session else ""
+
+        session_list += (
+            f"{status} `{sess['session_id']}`{is_active}\n"
+            f"  📁 {project_name}\n"
+            f"  ⏱️ {time_str}\n\n"
+        )
+
+    session_list += (
+        "**Session Commands:**\n"
+        "• `/session_create <path>` - Create new session\n"
+        "• `/session_close <id>` - Close a session\n"
+        "• `/session_cleanup` - Clean old sessions"
+    )
+
+    await update.message.reply_text(session_list, parse_mode='Markdown')
+
+
+async def session_create_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /session create command - Create new session"""
+    if not is_user_allowed(update.effective_user.id):
+        await update.message.reply_text("❌ You are not authorized to use this bot.")
+        return
+
+    if not context.args or len(context.args) < 1:
+        await update.message.reply_text(
+            "❌ Usage: `/session create <project-path>`\n\n"
+            "Example: `/session create /root/projects/my-app`",
+            parse_mode='Markdown'
+        )
+        return
+
+    project_path = context.args[0]
+    user_id = update.effective_user.id
+
+    session = session_manager.create_session(user_id, project_path)
+
+    if "error" in session:
+        await update.message.reply_text(f"❌ {session['message']}")
+    else:
+        project_name = os.path.basename(project_path)
+        await update.message.reply_text(
+            f"✅ Session created!\n\n"
+            f"📦 Session ID: `{session['session_id']}`\n"
+            f"📁 Project: {project_name}\n"
+            f"🔗 Path: `{project_path}`\n\n"
+            f"Use `/dev` commands to run tasks in this session.",
+            parse_mode='Markdown'
+        )
+
+
+async def session_close_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /session close command - Close a session"""
+    if not is_user_allowed(update.effective_user.id):
+        await update.message.reply_text("❌ You are not authorized to use this bot.")
+        return
+
+    if not context.args or len(context.args) < 1:
+        await update.message.reply_text(
+            "❌ Usage: `/session close <session-id>`\n\n"
+            "Example: `/session close sess_abc123`",
+            parse_mode='Markdown'
+        )
+        return
+
+    session_id = context.args[0]
+    user_id = update.effective_user.id
+
+    session = session_manager.get_session(session_id)
+
+    if not session:
+        await update.message.reply_text(f"❌ Session not found: `{session_id}`", parse_mode='Markdown')
+        return
+
+    if session["user_id"] != user_id:
+        await update.message.reply_text("❌ You don't own this session.")
+        return
+
+    if session_manager.close_session(session_id):
+        await update.message.reply_text(f"✅ Session closed: `{session_id}`", parse_mode='Markdown')
+    else:
+        await update.message.reply_text(f"❌ Failed to close session: `{session_id}`", parse_mode='Markdown')
+
+
+async def session_cleanup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /session cleanup command - Clean old sessions"""
+    if not is_user_allowed(update.effective_user.id):
+        await update.message.reply_text("❌ You are not authorized to use this bot.")
+        return
+
+    cleaned = session_manager.cleanup_sessions(max_age_hours=24)
+
+    if cleaned == 0:
+        await update.message.reply_text("✅ No old sessions to clean up.")
+    else:
+        await update.message.reply_text(f"✅ Cleaned up {cleaned} old session(s).")
 
 
 async def unknown_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -372,6 +532,10 @@ def main():
     application.add_handler(CommandHandler("dev", dev_command))
     application.add_handler(CommandHandler("server", server_command))
     application.add_handler(CommandHandler("workspace", workspace_command))
+    application.add_handler(CommandHandler("session", session_command))
+    application.add_handler(CommandHandler("session_create", session_create_command))
+    application.add_handler(CommandHandler("session_close", session_close_command))
+    application.add_handler(CommandHandler("session_cleanup", session_cleanup_command))
     application.add_handler(CommandHandler("stop", stop_command))
     application.add_handler(MessageHandler(filters.COMMAND, unknown_message))
 

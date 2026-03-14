@@ -1,23 +1,20 @@
 #!/bin/bash
 
 # Telegram ACPX Dev Bot Startup Script
-# Extracts bot token from OpenClaw config and starts bot
+# Uses its own bot token (separate from OpenClaw main bot)
 
 cd /root/telegram-acpx-devbot
 
-# Extract bot token using Python
-BOT_TOKEN=$(python3 -c "import json,re; f=open('/root/.openclaw/openclaw.json'); tokens=re.findall(r'\\\"botToken\\\":\\s*\\\"([^\\\"]+)\\\"', f.read()); print(tokens[0] if tokens else '')")
+# Use the dev bot's own token from config.py
+# This is a DIFFERENT bot from the OpenClaw main bot
+BOT_TOKEN='8754771378:AAFqdZNwYc8JbZanNy901IQr6lFmJs1gtm4'
 
 if [ -z "$BOT_TOKEN" ]; then
-    echo "❌ ERROR: No bot token found in OpenClaw config"
+    echo "❌ ERROR: Bot token not set"
     exit 1
 fi
 
-echo "✅ Bot token extracted (${#BOT_TOKEN} chars)"
-
-# Set environment variables
-export TELEGRAM_BOT_TOKEN="$BOT_TOKEN"
-export ZAI_API_KEY=$(python3 -c "import json; f=open('/root/.openclaw/openclaw.json'); c=json.load(f); print(c.get('env',{}).get('ZAI_API_KEY',''))")
+echo "✅ Bot token configured (${#BOT_TOKEN} chars)"
 
 # Start bot
 echo "🚀 Starting Telegram ACPX Dev Bot..."

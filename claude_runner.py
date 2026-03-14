@@ -38,7 +38,7 @@ class ClaudeRunner:
         abs_project_root = os.path.abspath(PROJECT_ROOT)
         abs_workspace = os.path.abspath(WORKSPACE_DIR)
 
-        # Must be within /root/projects
+        # Must be within WORKSPACE_DIR (allows both /root/workspaces and /root/projects if configured)
         if not abs_path.startswith(abs_workspace):
             return False
 
@@ -67,7 +67,7 @@ class ClaudeRunner:
         # Validate path for safety
         if not self._validate_path(project_path):
             update_callback(f"❌ Error: Invalid project path: {project_path}")
-            update_callback("❌ Tasks can only run in /root/projects/ directories")
+            update_callback(f"❌ Tasks can only run in {WORKSPACE_DIR}/ directories")
             return -1
 
         # Ensure project directory exists
