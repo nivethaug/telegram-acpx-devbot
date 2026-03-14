@@ -215,35 +215,54 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if len(output_buffer) >= BUFFER_SIZE:
             # Get last MAX_MESSAGE_LENGTH chars from buffer (keep recent logs)
             all_text = "\n".join(output_buffer)
-            if len(all_text) > MAX_MESSAGE_LENGTH:
-                batched_text = "... (truncated)\n" + all_text[-(MAX_MESSAGE_LENGTH - 20):]
-            else:
-                batched_text = all_text
 
-            try:
-                await initial_message.edit_text(
-                    f"🚀 Task Started\n📁 Project: {project_name}\n\n{batched_text}"
-                )
-            except Exception as e:
-                print(f"Error editing message: {e}")
-            # Don't clear buffer - keep cumulative history
+            # Instead of truncating, split into multiple messages
+            if len(all_text) > MAX_MESSAGE_LENGTH:
+                # Send as multiple chunks
+                for i in range(0, len(all_text), MAX_MESSAGE_LENGTH):
+                    chunk = all_text[i:i+MAX_MESSAGE_LENGTH]
+                    try:
+                        await update.message.reply_text(f"📊 Output continuation:\n\n{chunk}")
+                    except Exception as e:
+                        print(f"Error sending chunk: {e}")
+            else:
+                # Single message fits, edit the initial one
+                try:
+                    await initial_message.edit_text(
+                        f"🚀 Task Started\n📁 Project: {project_name}\n\n{all_text}"
+                    )
+                except Exception as e:
+                    print(f"Error editing message: {e}")
+
+            # Clear buffer after sending
+            output_buffer.clear()
 
     # Define async function to flush remaining buffer
     async def flush_buffer():
         nonlocal output_buffer, initial_message
         if output_buffer:
             all_text = "\n".join(output_buffer)
-            if len(all_text) > MAX_MESSAGE_LENGTH:
-                batched_text = "... (truncated)\n" + all_text[-(MAX_MESSAGE_LENGTH - 20):]
-            else:
-                batched_text = all_text
 
-            try:
-                await initial_message.edit_text(
-                    f"🚀 Task Started\n📁 Project: {project_name}\n\n{batched_text}"
-                )
-            except Exception as e:
-                print(f"Error flushing buffer: {e}")
+            # Instead of truncating, split into multiple messages
+            if len(all_text) > MAX_MESSAGE_LENGTH:
+                # Send as multiple chunks
+                for i in range(0, len(all_text), MAX_MESSAGE_LENGTH):
+                    chunk = all_text[i:i+MAX_MESSAGE_LENGTH]
+                    try:
+                        await update.message.reply_text(f"📊 Output continuation:\n\n{chunk}")
+                    except Exception as e:
+                        print(f"Error sending chunk: {e}")
+            else:
+                # Single message fits, edit the initial one
+                try:
+                    await initial_message.edit_text(
+                        f"🚀 Task Started\n📁 Project: {project_name}\n\n{all_text}"
+                    )
+                except Exception as e:
+                    print(f"Error flushing buffer: {e}")
+
+            # Clear buffer after sending
+            output_buffer.clear()
 
     # Get event loop for thread-safe async calls
     loop = asyncio.get_event_loop()
