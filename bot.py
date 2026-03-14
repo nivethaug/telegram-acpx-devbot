@@ -208,21 +208,85 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Filter out ACPX JSON telemetry objects (NOT based on word matches)
         # ACPX telemetry objects have specific patterns, legitimate output doesn't
+                # Filter out ALL ACPX JSON-RPC telemetry and internal output
+        # ACPX sends multi-line JSON telemetry that can span many lines
+        # We filter aggressively to prevent this noise
         acpx_telemetry_patterns = [
-            "{",  # JSON object start
-            '"sessionId":',  # Session ID in JSON
-            '"sessionUpdate":',  # Session update in JSON
-            '"params": { "_errors":',  # Params with errors array
-            '"toolCallId": { "_errors":',  # Tool call ID with errors
-            '"entries": { "_errors":',  # Entries with errors
-            '"availableCommands": { "_errors":',  # Commands with errors
-            '"currentModeId": { "_errors":',  # Mode ID with errors
-            '"configOptions": { "_errors":',  # Config with errors
-            '"used": { "_errors":',  # Used with errors
-            '"title": { "_errors":',  # Title with errors
-            '"code": -32602',  # Code -32602 (JSON-RPC error)
-            '{"data": {"_errors":',  # Full JSON error object
+            # JSON-RPC method/params patterns (entire lines)
+            '"method":',
+            '"params":',
+            'method:',
+            'params: {',
+            'params: [',
+            'params: null',
+            
+            # Session management telemetry
+            '"sessionId":',
+            '"sessionUpdate":',
+            '"sessionUpdate"',
+            'sessionUpdate:',
+            'sessionId:',
+            
+            # Tool/feature telemetry
+            '"toolCallId":',
+            '"entries":',
+            '"availableCommands":',
+            '"currentModeId":',
+            '"configOptions":',
+            
+            # Usage tracking
+            '"used":',
+            'used: {',
+            '"cost":',
+            'cost: {',
+            
+            # Error telemetry (entire lines or parts)
+            '"_errors":',
+            '_errors: [',
+            '"title": { "_errors"',
+            'title: { _errors:',
+            '"toolCallId": { "_errors"',
+            'toolCallId: { _errors:',
+            '"entries": { "_errors"',
+            'entries: { _errors:',
+            '"availableCommands": { "_errors"',
+            'availableCommands": { _errors:',
+            '"currentModeId": { "_errors"',
+            'currentModeId: { _errors:',
+            '"configOptions": { "_errors"',
+            'configOptions": { _errors:',
+            '"used": { "_errors"',
+            'used: { _errors:',
+            
+            # Error codes
+            'code: -32602',
+            'code: -32700',
+            'code: -32600',
+            
+            # Update blocks (entire lines)
+            'update: {',
+            '"update":',
+            
+            # Generic JSON telemetry markers
+            '{"data": {',
+            '{ "_errors":',
+            
+            # ACPX debug markers
+            "[thinking]",
+            "[tool]",
+            "[input]",
+            "[files]",
+            "[output]",
+            "[system-reminder]",
+            "[client]",
+            "[done]",
+            "[error]",
+            
+            # JSON-RPC protocol markers
+            "jsonrpc:",
+            "Error handling notification"
         ]
+
         
         # Filter if line matches any telemetry pattern
         if any(pattern in line for pattern in acpx_telemetry_patterns):
