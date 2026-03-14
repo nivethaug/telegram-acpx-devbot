@@ -222,8 +222,33 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "[done]",
             "[error]",
             "jsonrpc:",
-            "Error handling notification"
+            "Error handling notification",
+            "'Invalid input:",
+            "params:",
+            "sessionUpdate:",
+            "toolCallId:",
+            "entries:",
+            "availableCommands:",
+            "currentModeId:",
+            "configOptions:",
+            "used:",
+            "params: { _errors:",
+            "_errors:",
+            "cost:",
+            "_errors: [Array]",
+            "title: { _errors:",
+            "toolCallId: { _errors:",
+            "entries: { _errors:",
+            "availableCommands: { _errors:",
+            "currentModeId: { _errors:",
+            "configOptions: { _errors:",
+            "used: { _errors:"
         ]
+        
+        # Also filter lines that look like ACPX JSON telemetry (contain _errors pattern)
+        if "_errors:" in line and "{" in line:
+            print(f"[DEBUG] Filtered ACPX JSON telemetry: {line[:80]}...")
+            return
         
         if any(noise in line for noise in acpx_noise_patterns):
             print(f"[DEBUG] Filtered ACPX noise: {line[:80]}...")
