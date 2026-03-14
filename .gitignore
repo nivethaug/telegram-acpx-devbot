@@ -1,1 +1,30 @@
+# Python
 venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# Logs
+*.log
+bot.log
+
+# Node
+node_modules/
+
+# Environment
+.env
+
+# PM2
+*.dump.pm2
+
+# Backups and temp files
+*_backup.py
+*_old.py
+*_new.py
+*_broken.py
+*_v2.py
+fix_bot.py

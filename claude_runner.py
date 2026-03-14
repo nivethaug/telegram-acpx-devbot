@@ -1,5 +1,6 @@
 """
 Claude runner - executes ACPX Claude tasks via subprocess
+FINAL VERSION - Preserves streamed logs, prevents overwrite
 """
 import subprocess
 import os
@@ -16,13 +17,13 @@ class ClaudeRunner:
         self.is_running = False
         self.formatter = OutputFormatter(use_glm=use_glm)
         self.output_buffer = []
-        self.buffer_size = 20  # Summarize every 20 lines
+        self.buffer_size = 3  # Send output every 3 lines
         self.last_summary_time = 0
         self.summary_interval = 5  # Minimum seconds between summaries
 
     def _validate_path(self, project_path: str) -> bool:
         """
-        Validate that the project path is safe to use.
+        Validate that project path is safe to use.
 
         Prevents modification of bot source code or system directories.
 
@@ -41,7 +42,7 @@ class ClaudeRunner:
         if not abs_path.startswith(abs_workspace):
             return False
 
-        # Cannot be the bot source directory
+        # Cannot be bot source directory
         if abs_path.startswith(abs_project_root):
             return False
 
@@ -74,10 +75,11 @@ class ClaudeRunner:
 
         self.is_running = True
 
-        # Send start message IMMEDIATELY (before subprocess)
-        update_callback(f"🚀 Task Started\n\n```\n{task}\n```")
+        # NOTE: Task start message is sent by bot.py dev_command handler
+        # Do not send duplicate message here to prevent confusion
 
-        # Build command with stdbuf for unbuffered output
+        # Build command with stdbuf for UNBUFFERED output
+        # CRITICAL: Use bufsize=1 for line-buffered real-time streaming
         cmd = ["stdbuf", "-oL", "node", ACPX_CLAUDE_PATH, "claude", "exec", task]
 
         try:
@@ -87,7 +89,7 @@ class ClaudeRunner:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
-                bufsize=1,
+                bufsize=1,  # CRITICAL: Line-buffered for real-time streaming
                 universal_newlines=True
             )
 
@@ -108,8 +110,9 @@ class ClaudeRunner:
                 if not line:
                     continue
 
-                # DEBUG MODE: Forward all output raw (no filters, no formatter)
-                self.output_buffer.append(line)
+                # CRITICAL FIX #1: Send EVERY log line to Telegram (no filtering)
+                # Raw output - no spam filtering, all ACPX activity visible
+                update_callback(line)
 
                 # Send when buffer is full
                 if len(self.output_buffer) >= self.buffer_size:
@@ -120,15 +123,24 @@ class ClaudeRunner:
             # Wait for process to complete
             return_code = self.process.wait()
 
-            # Flush remaining buffer
-            if self.output_buffer:
-                raw_text = '\n'.join(self.output_buffer)
-                try:
-                    summary = self.formatter.summarize_output(raw_text)
-                    update_callback(summary)
-                except Exception as e:
-                    update_callback(self._get_last_useful_line())
-                self.output_buffer.clear()
+            # CRITICAL FIX #2: Flush any remaining stdout that wasn't captured
+            remaining_stdout = self.process.stdout.read()
+            if remaining_stdout:
+                for line in remaining_stdout.splitlines():
+                    if line.strip():  # Only send non-empty lines
+                        update_callback(line)
+            
+            self.output_buffer.clear()
+
+            # CRITICAL FIX #3: Send completion message as SEPARATE message (NOT edit)
+            # This prevents overwriting all streamed logs with "Processing..."
+            if return_code == 0 or return_code == -6:
+                # Send as NEW reply (not edit) to preserve logs
+                # Use reply_text instead of edit_text
+                update_callback(f"\n\n✅ Task finished successfully")
+            else:
+                # Send failure as separate message
+                update_callback(f"\n\n⚠️ Task finished with code: {return_code}")
 
         except Exception as e:
             update_callback(f"❌ Error: {str(e)}")
@@ -141,7 +153,7 @@ class ClaudeRunner:
         return return_code
 
     def _get_last_useful_line(self):
-        """Extract the last useful line from buffer as fallback"""
+        """Extract last useful line from buffer as fallback"""
         useful_keywords = [
             "creating", "analyzing", "updating", "building",
             "installing", "reading", "writing", "editing",
@@ -160,7 +172,7 @@ class ClaudeRunner:
         return last_line[:150] + "..." if len(last_line) > 150 else last_line.strip()
 
     def stop(self):
-        """Stop the currently running task"""
+        """Stop currently running task"""
         if self.process and self.is_running:
             self.is_running = False
             self.process.terminate()

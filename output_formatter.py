@@ -97,6 +97,7 @@ class OutputFormatter:
         Instead of filtering noise, we only allow lines that match useful patterns.
         This is more robust than blacklist filtering.
         """
+        line_lower = line.lower().strip()
 
         # Whitelist: only allow lines with useful keywords
         useful_patterns = [

@@ -11,7 +11,7 @@ import threading
 from queue import Queue
 
 from config import TELEGRAM_BOT_TOKEN, ALLOWED_USER_IDS, TELEGRAM_BUFFER_SIZE, USE_GLM, WORKSPACE_DIR, PROJECT_ROOT, WORKER_COUNT
-from claude_runner import ClaudeRunner
+from claude_runner_v2 import ClaudeRunner
 from server_tools import get_server_status
 
 
@@ -25,7 +25,7 @@ workers_running = False
 
 
 def is_user_allowed(user_id):
-    """Check if user is allowed to use the bot"""
+    """Check if user is allowed to use bot"""
     if not ALLOWED_USER_IDS:
         return True  # Allow all if list is empty
     return user_id in ALLOWED_USER_IDS
@@ -89,11 +89,11 @@ def improve_task_command(task: str) -> str:
 
     # Simple file listing - USE TOOL TRIGGER
     if task_lower in ['list files', 'ls', 'ls -la', 'list', 'files']:
-        return "Use the terminal to run `ls -la` in the project directory and list all files and folders."
+        return "Use terminal to run `ls -la` in project directory and list all files and folders."
 
     # Show structure - USE TOOL TRIGGER
     if task_lower in ['show structure', 'tree', 'structure', 'show project structure']:
-        return "Use the terminal to run `tree` or `find . -type f -o -type d` to show the complete directory structure."
+        return "Use terminal to run `tree` or `find . -type f -o -type d` to show complete directory structure."
 
     # Create file - USE TOOL TRIGGER
     if task_lower.startswith('create file'):
@@ -120,11 +120,11 @@ def improve_task_command(task: str) -> str:
 
     # Run tests - USE TOOL TRIGGER
     if 'test' in task_lower and len(task_lower) < 20:
-        return "Use the terminal to run the test command (npm test, python -m pytest, etc.) and show the results."
+        return "Use the terminal to run a test command (npm test, python -m pytest, etc.) and show the results."
 
     # Build - USE TOOL TRIGGER
     if task_lower in ['build', 'run build']:
-        return "Use the terminal to run the build command (npm run build, python setup.py build, etc.) and fix any errors."
+        return "Use the terminal to run a build command (npm run build, python setup.py build, etc.) and fix any errors."
 
     # Default: return original task (with path fixes applied)
     # Don't modify natural language prompts - let ACPX interpret them
@@ -144,7 +144,7 @@ Welcome! This bot allows you to run ACPX Claude coding tasks remotely.
 **Available Commands:**
 /dev `<task>` - Run a development task with ACPX Claude
 /server - Show server status (CPU, RAM, Disk)
-/stop - Stop the currently running task
+/stop - Stop currently running task
 
 **Example:**
 /dev Create a simple Python web server
@@ -171,57 +171,102 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Resolve project path from task
     project_path, cleaned_task = resolve_project_path(task)
 
-    # Improve task command for better AI response (only path fixes, minimal modification)
-    task = improve_task_command(cleaned_task)
-
     # Send initial message with project info
     project_name = project_path.replace("/root/projects/", "")
-    status_message = await update.message.reply_text(
-        f"🚀 **Task Started**\n\n📁 Project: `{project_name}`",
-        parse_mode='Markdown'
+
+    # CRITICAL FIX #4: Save initial message object for later updates
+    initial_message = await update.message.reply_text(
+        f"🚀 Task Started\n\nTask: {task}\n📁 Project: {project_name}"
     )
 
     # Buffer for batched streaming
     output_buffer = []
     BUFFER_SIZE = TELEGRAM_BUFFER_SIZE  # Send updates every N lines (from config)
+    MAX_MESSAGE_LENGTH = 3500  # Telegram limit is 4096, keep ~3500 for safety
 
-    # Define callback for streaming output (DEBUG MODE - raw output)
+    # Define callback for streaming output with proper batching
     async def send_output(line):
-        nonlocal output_buffer
+        nonlocal output_buffer, initial_message
+
+        # Filter out ACPX telemetry noise
+        if any(noise in line for noise in ["session/update", "Invalid params", "usageupdate", "size:"]):
+            return
+
         output_buffer.append(line)
 
         if len(output_buffer) >= BUFFER_SIZE:
-            # Update status message with raw output
-            batched_text = "\n".join(output_buffer)
+            # Get last MAX_MESSAGE_LENGTH chars from buffer (keep recent logs)
+            all_text = "\n".join(output_buffer)
+            if len(all_text) > MAX_MESSAGE_LENGTH:
+                batched_text = "... (truncated)\n" + all_text[-(MAX_MESSAGE_LENGTH - 20):]
+            else:
+                batched_text = all_text
+
             try:
-                await status_message.edit_text(f"🚀 Task Started\n📁 Project: `{project_name}`\n{batched_text}", parse_mode='Markdown')
+                await initial_message.edit_text(
+                    f"🚀 Task Started\n📁 Project: {project_name}\n\n{batched_text}"
+                )
             except Exception as e:
                 print(f"Error editing message: {e}")
-            output_buffer.clear()
+            # Don't clear buffer - keep cumulative history
 
     # Define async function to flush remaining buffer
     async def flush_buffer():
-        nonlocal output_buffer
+        nonlocal output_buffer, initial_message
         if output_buffer:
-            batched_text = "\n".join(output_buffer)
-            try:
-                await status_message.edit_text(f"🚀 Task Started\n📁 Project: `{project_name}`\n{batched_text}", parse_mode='Markdown')
-            except Exception as e:
-                print(f"Error editing message: {e}")
-            output_buffer.clear()
+            all_text = "\n".join(output_buffer)
+            if len(all_text) > MAX_MESSAGE_LENGTH:
+                batched_text = "... (truncated)\n" + all_text[-(MAX_MESSAGE_LENGTH - 20):]
+            else:
+                batched_text = all_text
 
-    # Get the event loop for thread-safe async calls
+            try:
+                await initial_message.edit_text(
+                    f"🚀 Task Started\n📁 Project: {project_name}\n\n{batched_text}"
+                )
+            except Exception as e:
+                print(f"Error flushing buffer: {e}")
+
+    # Get event loop for thread-safe async calls
     loop = asyncio.get_event_loop()
 
     # Run task in thread with project_path
     def run_task():
-        return_code = runner.run_task(task, lambda line: asyncio.run_coroutine_threadsafe(send_output(line), loop), project_path=project_path)
+        # DEBUG: Log task execution start
+        print(f"[DEBUG] Starting task: {task}")
+        print(f"[DEBUG] Project path: {project_path}")
+        print(f"[DEBUG] About to call runner.run_task...")
+        
+        # Call runner.run_task with streaming callback
+        try:
+            return_code = runner.run_task(task, lambda line: asyncio.run_coroutine_threadsafe(send_output(line), loop), project_path=project_path)
+            print(f"[DEBUG] runner.run_task returned: {return_code}")
+            print(f"[DEBUG] Process poll status: {runner.process.poll()}")
+            print(f"[DEBUG] Runner is_running: {runner.is_running}")
+        except Exception as e:
+            print(f"[DEBUG] EXCEPTION in run_task: {e}")
+            return_code = -1
+        
+        # DEBUG: Log completion
+        print(f"[DEBUG] Task thread finished with code: {return_code}")
 
         # ACPX returns -6 (SIGABRT) after successful task when usage reporting fails
-        # Treat -6 as success since the actual task completed
-        if return_code in (0, -6):
+        # Treat -6 as success since actual task completed
+        # CRITICAL FIX #5: Send completion as REPLY (not edit) to preserve streamed logs
+        # This prevents "Processing..." from erasing all useful progress
+        if return_code == 0 or return_code == -6:
+            # Flush any remaining output first
             asyncio.run_coroutine_threadsafe(flush_buffer(), loop)
-            asyncio.run_coroutine_threadsafe(send_output("✅ Task finished successfully"), loop)
+            # Send completion as NEW REPLY (not edit) - preserves all logs
+            try:
+                # Using reply_text() instead of edit_text() creates a new message, not overwrites
+                asyncio.run_coroutine_threadsafe(
+                    update.message.reply_text(f"\n\n✅ Task finished successfully"),
+                    loop
+                )
+                print(f"[DEBUG] Sent completion message as reply")
+            except Exception as e:
+                print(f"[DEBUG] Error sending reply: {e}")
         else:
             asyncio.run_coroutine_threadsafe(flush_buffer(), loop)
             asyncio.run_coroutine_threadsafe(send_output(f"⚠️ Task finished with code: {return_code}"), loop)
@@ -297,7 +342,7 @@ async def unknown_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def main():
-    """Start the bot"""
+    """Starts bot"""
     # Check for bot token
     token = os.environ.get('TELEGRAM_BOT_TOKEN') or TELEGRAM_BOT_TOKEN
 
