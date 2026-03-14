@@ -206,8 +206,27 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async def send_output(line):
         nonlocal output_buffer, initial_message
 
-        # Filter out ACPX telemetry noise
-        if any(noise in line for noise in ["session/update", "Invalid params", "usageupdate", "size:"]):
+        # Filter out ACPX telemetry noise and debug messages
+        acpx_noise_patterns = [
+            "session/update",
+            "Invalid params",
+            "usageupdate",
+            "size:",
+            "[thinking]",
+            "[tool]",
+            "[input]",
+            "[files]",
+            "[output]",
+            "[system-reminder]",
+            "[client]",
+            "[done]",
+            "[error]",
+            "jsonrpc:",
+            "Error handling notification"
+        ]
+        
+        if any(noise in line for noise in acpx_noise_patterns):
+            print(f"[DEBUG] Filtered ACPX noise: {line[:80]}...")
             return
 
         # DEBUG: Log received line
