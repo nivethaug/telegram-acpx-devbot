@@ -208,10 +208,18 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Filter out ACPX telemetry noise and debug messages
         acpx_noise_patterns = [
-            "session/update",
-            "Invalid params",
-            "usageupdate",
-            "size:",
+            "sessionId:",
+            "params:",
+            "code: -32602",
+            "sessionUpdate:",
+            "toolCallId:",
+            "entries:",
+            "availableCommands:",
+            "currentModeId:",
+            "configOptions:",
+            "used:",
+            "_errors:",
+            "cost:",
             "[thinking]",
             "[tool]",
             "[input]",
@@ -222,33 +230,8 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "[done]",
             "[error]",
             "jsonrpc:",
-            "Error handling notification",
-            "'Invalid input:",
-            "params:",
-            "sessionUpdate:",
-            "toolCallId:",
-            "entries:",
-            "availableCommands:",
-            "currentModeId:",
-            "configOptions:",
-            "used:",
-            "params: { _errors:",
-            "_errors:",
-            "cost:",
-            "_errors: [Array]",
-            "title: { _errors:",
-            "toolCallId: { _errors:",
-            "entries: { _errors:",
-            "availableCommands: { _errors:",
-            "currentModeId: { _errors:",
-            "configOptions: { _errors:",
-            "used: { _errors:"
+            "Error handling notification"
         ]
-        
-        # Also filter lines that look like ACPX JSON telemetry (contain _errors pattern)
-        if "_errors:" in line and "{" in line:
-            print(f"[DEBUG] Filtered ACPX JSON telemetry: {line[:80]}...")
-            return
         
         if any(noise in line for noise in acpx_noise_patterns):
             print(f"[DEBUG] Filtered ACPX noise: {line[:80]}...")

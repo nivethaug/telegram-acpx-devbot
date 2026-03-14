@@ -152,35 +152,9 @@ class ClaudeRunner:
 
             self.output_buffer.clear()
 
-            # CRITICAL FIX #3: Send completion message as SEPARATE message (NOT edit)
-            # This prevents overwriting all streamed logs with "Processing..."
-            if return_code == 0 or return_code == -6:
-                # Send as NEW reply (not edit) to preserve logs
-                # Use reply_text instead of edit_text
-                try:
-                    update_callback(f"\n\n✅ Task finished successfully")
-                except Exception as e:
-                    print(f"[DEBUG RUNNER] Error sending completion: {e}")
-            else:
-                # Send failure as separate message
-                try:
-                    update_callback(f"\n\n⚠️ Task finished with code: {return_code}")
-                except Exception as e:
-                    print(f"[DEBUG RUNNER] Error sending failure: {e}")
-
-        except Exception as e:
-            print(f"[DEBUG RUNNER] EXCEPTION: {e}")
-            try:
-                update_callback(f"❌ Error: {str(e)}")
-            except Exception as cb_e:
-                print(f"[DEBUG RUNNER] Error in exception callback: {cb_e}")
-            return_code = -1
-
-        finally:
-            self.is_running = False
-            self.process = None
-
-        return return_code
+            # NOTE: Completion messages are sent by bot.py's run_task() function
+            # Do NOT send them here to avoid duplication
+            return return_code
 
     def _get_last_useful_line(self):
         """Extract last useful line from buffer as fallback"""
