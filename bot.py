@@ -271,6 +271,10 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             '{"data": {',
             '{ "_errors":',
             
+            # Specific ACPX error messages (with quotes)
+            '"Invalid input: expected object, received undefined"',
+            "'Invalid input: expected object, received undefined'",
+            
             # ACPX debug markers
             "[thinking]",
             "[tool]",
