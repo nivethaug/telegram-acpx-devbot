@@ -206,35 +206,27 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async def send_output(line):
         nonlocal output_buffer, initial_message
 
-        # Filter out ACPX telemetry noise and debug messages
-        acpx_noise_patterns = [
-            "sessionId:",
-            "params:",
-            "code: -32602",
-            "sessionUpdate:",
-            "toolCallId:",
-            "entries:",
-            "availableCommands:",
-            "currentModeId:",
-            "configOptions:",
-            "used:",
-            "_errors:",
-            "cost:",
-            "[thinking]",
-            "[tool]",
-            "[input]",
-            "[files]",
-            "[output]",
-            "[system-reminder]",
-            "[client]",
-            "[done]",
-            "[error]",
-            "jsonrpc:",
-            "Error handling notification"
+        # Filter out ACPX JSON telemetry objects (NOT based on word matches)
+        # ACPX telemetry objects have specific patterns, legitimate output doesn't
+        acpx_telemetry_patterns = [
+            "{",  # JSON object start
+            '"sessionId":',  # Session ID in JSON
+            '"sessionUpdate":',  # Session update in JSON
+            '"params": { "_errors":',  # Params with errors array
+            '"toolCallId": { "_errors":',  # Tool call ID with errors
+            '"entries": { "_errors":',  # Entries with errors
+            '"availableCommands": { "_errors":',  # Commands with errors
+            '"currentModeId": { "_errors":',  # Mode ID with errors
+            '"configOptions": { "_errors":',  # Config with errors
+            '"used": { "_errors":',  # Used with errors
+            '"title": { "_errors":',  # Title with errors
+            '"code": -32602',  # Code -32602 (JSON-RPC error)
+            '{"data": {"_errors":',  # Full JSON error object
         ]
         
-        if any(noise in line for noise in acpx_noise_patterns):
-            print(f"[DEBUG] Filtered ACPX noise: {line[:80]}...")
+        # Filter if line matches any telemetry pattern
+        if any(pattern in line for pattern in acpx_telemetry_patterns):
+            print(f"[DEBUG] Filtered ACPX telemetry: {line[:80]}...")
             return
 
         # DEBUG: Log received line

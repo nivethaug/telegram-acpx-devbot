@@ -75,10 +75,6 @@ class ClaudeRunner:
 
         self.is_running = True
 
-        print(f"[DEBUG RUNNER] Starting task: {task}")
-        print(f"[DEBUG RUNNER] Working directory: {project_path}")
-        print(f"[DEBUG RUNNER] Command: {' '.join(['stdbuf', '-oL', 'node', ACPX_CLAUDE_PATH, 'claude', 'exec', task])}")
-
         # NOTE: Task start message is sent by bot.py dev_command handler
         # Do not send duplicate message here to prevent confusion
 
@@ -87,7 +83,6 @@ class ClaudeRunner:
         cmd = ["stdbuf", "-oL", "node", ACPX_CLAUDE_PATH, "claude", "exec", task]
 
         try:
-            print(f"[DEBUG RUNNER] Starting subprocess...")
             self.process = subprocess.Popen(
                 cmd,
                 cwd=project_path,
@@ -97,64 +92,65 @@ class ClaudeRunner:
                 bufsize=1,  # CRITICAL: Line-buffered for real-time streaming
                 universal_newlines=True
             )
-            print(f"[DEBUG RUNNER] Subprocess started, PID: {self.process.pid}")
 
             # Stream output line by line using readline
-            line_count = 0
             while True:
                 line = self.process.stdout.readline()
-
+                
                 # Process completion detection
                 if not line:
                     if self.process.poll() is not None:
                         # Process finished
-                        print(f"[DEBUG RUNNER] Process finished, return code: {self.process.poll()}")
                         break
                     continue
-
+                
                 line = line.rstrip('\n\r')
-                line_count += 1
-
+                
                 # Skip empty lines
                 if not line:
                     continue
 
-                print(f"[DEBUG RUNNER] Line {line_count}: {line[:200]}")
-
                 # CRITICAL FIX #1: Send EVERY log line to Telegram (no filtering)
                 # Raw output - no spam filtering, all ACPX activity visible
-                try:
-                    update_callback(line)
-                except Exception as e:
-                    print(f"[DEBUG RUNNER] Error in callback: {e}")
+                update_callback(line)
 
                 # Send when buffer is full
                 if len(self.output_buffer) >= self.buffer_size:
                     raw_text = '\n'.join(self.output_buffer)
-                    print(f"[DEBUG RUNNER] Sending buffer: {len(raw_text)} chars")
                     update_callback(raw_text)
                     self.output_buffer.clear()
 
             # Wait for process to complete
             return_code = self.process.wait()
-            print(f"[DEBUG RUNNER] Task completed with code: {return_code}")
 
             # CRITICAL FIX #2: Flush any remaining stdout that wasn't captured
             remaining_stdout = self.process.stdout.read()
             if remaining_stdout:
-                print(f"[DEBUG RUNNER] Flushing remaining stdout: {len(remaining_stdout)} chars")
                 for line in remaining_stdout.splitlines():
                     if line.strip():  # Only send non-empty lines
-                        try:
-                            update_callback(line)
-                        except Exception as e:
-                            print(f"[DEBUG RUNNER] Error flushing line: {e}")
-
+                        update_callback(line)
+            
             self.output_buffer.clear()
 
-            # NOTE: Completion messages are sent by bot.py's run_task() function
-            # Do NOT send them here to avoid duplication
-            return return_code
+            # CRITICAL FIX #3: Send completion message as SEPARATE message (NOT edit)
+            # This prevents overwriting all streamed logs with "Processing..."
+            if return_code == 0 or return_code == -6:
+                # Send as NEW reply (not edit) to preserve logs
+                # Use reply_text instead of edit_text
+                update_callback(f"\n\n✅ Task finished successfully")
+            else:
+                # Send failure as separate message
+                update_callback(f"\n\n⚠️ Task finished with code: {return_code}")
+
+        except Exception as e:
+            update_callback(f"❌ Error: {str(e)}")
+            return_code = -1
+
+        finally:
+            self.is_running = False
+            self.process = None
+
+        return return_code
 
     def _get_last_useful_line(self):
         """Extract last useful line from buffer as fallback"""
