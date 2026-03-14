@@ -210,6 +210,9 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if any(noise in line for noise in ["session/update", "Invalid params", "usageupdate", "size:"]):
             return
 
+        # DEBUG: Log received line
+        print(f"[DEBUG] Received line: {line[:100]}...")
+
         output_buffer.append(line)
 
         if len(output_buffer) >= BUFFER_SIZE:
@@ -219,10 +222,12 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Instead of truncating, split into multiple messages
             if len(all_text) > MAX_MESSAGE_LENGTH:
                 # Send as multiple chunks
+                print(f"[DEBUG] Sending {len(all_text)} chars in chunks...")
                 for i in range(0, len(all_text), MAX_MESSAGE_LENGTH):
                     chunk = all_text[i:i+MAX_MESSAGE_LENGTH]
                     try:
                         await update.message.reply_text(f"📊 Output continuation:\n\n{chunk}")
+                        print(f"[DEBUG] Sent chunk {i//MAX_MESSAGE_LENGTH + 1}")
                     except Exception as e:
                         print(f"Error sending chunk: {e}")
             else:
@@ -231,6 +236,7 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await initial_message.edit_text(
                         f"🚀 Task Started\n📁 Project: {project_name}\n\n{all_text}"
                     )
+                    print(f"[DEBUG] Edited initial message with {len(all_text)} chars")
                 except Exception as e:
                     print(f"Error editing message: {e}")
 
@@ -246,10 +252,12 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Instead of truncating, split into multiple messages
             if len(all_text) > MAX_MESSAGE_LENGTH:
                 # Send as multiple chunks
+                print(f"[DEBUG] Flushing {len(all_text)} chars in chunks...")
                 for i in range(0, len(all_text), MAX_MESSAGE_LENGTH):
                     chunk = all_text[i:i+MAX_MESSAGE_LENGTH]
                     try:
                         await update.message.reply_text(f"📊 Output continuation:\n\n{chunk}")
+                        print(f"[DEBUG] Flushed chunk {i//MAX_MESSAGE_LENGTH + 1}")
                     except Exception as e:
                         print(f"Error sending chunk: {e}")
             else:
@@ -258,6 +266,7 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await initial_message.edit_text(
                         f"🚀 Task Started\n📁 Project: {project_name}\n\n{all_text}"
                     )
+                    print(f"[DEBUG] Flushed initial message with {len(all_text)} chars")
                 except Exception as e:
                     print(f"Error flushing buffer: {e}")
 
