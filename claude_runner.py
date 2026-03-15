@@ -15,6 +15,8 @@ class ClaudeRunner:
     def __init__(self, use_glm=True):
         self.process = None
         self.is_running = False
+        self.process_exited_time = 0  # Track when subprocess actually exits
+        self.grace_period = 5  # Seconds to allow final telemetry after exit
         self.formatter = OutputFormatter(use_glm=use_glm)
         self.output_buffer = []
         self.buffer_size = 3  # Send output every 3 lines
@@ -93,16 +95,17 @@ class ClaudeRunner:
                 universal_newlines=True
             )
 
-            # Stream output line by line using readline
+            # Track when subprocess actually starts and exits
+            self.process_exited_time = 0
+
+            # Stream output line by line
             while True:
                 line = self.process.stdout.readline()
                 
-                # Process completion detection
-                if not line:
-                    if self.process.poll() is not None:
-                        # Process finished
-                        break
-                    continue
+                # Check if process has exited recently (handle final telemetry)
+                if self.process.poll() is not None and self.process_exited_time == 0:
+                    self.process_exited_time = time.time()
+                    print(f"[DEBUG] Process exited at {self.process_exited_time}")
                 
                 line = line.rstrip('\n\r')
                 
