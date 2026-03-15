@@ -113,12 +113,6 @@ class ClaudeRunner:
                 if not line:
                     continue
 
-                # CRITICAL: Standalone mode - skip session management
-                if not use_session:
-                    print(f"[DEBUG] Standalone mode: skipping session telemetry for '{line[:50]}...'")
-                    # Don't skip session messages in standalone mode
-                    # update_callback(line)  # Process all output normally
-
                 # CRITICAL FIX #1: Send EVERY log line to Telegram (no filtering)
                 # Raw output - no spam filtering, all ACPX activity visible
                 update_callback(line)
