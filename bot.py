@@ -192,14 +192,12 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         session_type = "existing session"
         # Mark session as active
         session_manager.set_session_running(session_id, True)
-        use_session = True
     else:
         # No session - use DEFAULT_WORKSPACE
         workspace_path = DEFAULT_WORKSPACE
         project_display = DEFAULT_WORKSPACE
         session_id = "none"
         session_type = "standalone" if standalone else "no session"
-        use_session = False
 
     # Send initial message with project info
     project_name = os.path.basename(project_display)
