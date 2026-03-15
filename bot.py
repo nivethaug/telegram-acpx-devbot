@@ -201,6 +201,19 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     output_buffer = []
     BUFFER_SIZE = TELEGRAM_BUFFER_SIZE  # Send updates every N lines (from config)
     MAX_MESSAGE_LENGTH = 3500  # Telegram limit is 4096, keep ~3500 for safety
+    
+    # CRITICAL: Deduplicate output - track recent output to prevent actual duplicates
+    last_hashes = set()  # Track SHA256 hashes of recent output
+    MAX_HASH_TRACKING = 20  # Track more hashes (20 instead of 10)
+    
+    # Track last command to detect ACPX retry loops (1 second cooldown)
+    last_command = {"text": None, "time": 0}
+    COMMAND_COOLDOWN = 1  # 1 second - only block exact same command
+    
+    # Track last output to prevent message-level duplicates (1 second cooldown)
+    last_output_hash = None
+    last_output_time = 0
+    OUTPUT_COOLDOWN = 1  # 1 second - only block exact same output
 
     # Define callback for streaming output with proper batching
     async def send_output(line):
@@ -385,12 +398,14 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     except Exception as e:
                         print(f"Error sending chunk: {e}")
             else:
-                # Single message fits, send NEW message (not edit)
+                # Single message fits, edit the initial one
                 try:
-                    await update.message.reply_text(f"📊 Output:\n\n{all_text}")
-                    print(f"[DEBUG] Sent output message with {len(all_text)} chars")
+                    await initial_message.edit_text(
+                        f"🚀 Task Started\n📁 Project: {project_name}\n\n{all_text}"
+                    )
+                    print(f"[DEBUG] Edited initial message with {len(all_text)} chars")
                 except Exception as e:
-                    print(f"Error sending output message: {e}")
+                    print(f"Error editing message: {e}")
 
             # Clear buffer after sending
             output_buffer.clear()
@@ -416,7 +431,7 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     except Exception as e:
                         print(f"Error sending chunk: {e}")
             else:
-                # Single message fits, send NEW message (not edit)
+                # Single message fits, edit the initial one
                 try:
                     await update.message.reply_text(f"📊 Output:\n\n{all_text}")
                     print(f"[DEBUG] Sent flush message with {len(all_text)} chars")
