@@ -464,9 +464,9 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print(f"[DEBUG] Project display: {project_display}")
         print(f"[DEBUG] About to call runner.run_task...")
 
-        # Call runner.run_task with streaming callback and session flag
+        # Call runner.run_task with streaming callback
         try:
-            return_code = runner.run_task(task, lambda line: asyncio.run_coroutine_threadsafe(send_output(line), loop), project_path=workspace_path, use_session=use_session)
+            return_code = runner.run_task(task, lambda line: asyncio.run_coroutine_threadsafe(send_output(line), loop), project_path=workspace_path)
             print(f"[DEBUG] runner.run_task returned: {return_code}")
             # CRITICAL FIX: Only check process.poll() if runner.process exists
             if runner.process is not None:
