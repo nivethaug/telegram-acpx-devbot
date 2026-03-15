@@ -318,11 +318,57 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # DEBUG: Log received line
         print(f"[DEBUG] Received line: {line[:100]}...")
 
+        # CRITICAL #1: Detect and skip ACPX retry loops (same command repeated)
+        # Pattern: "input: <command>" indicates a command being executed
+        if "input:" in line.lower() and len(line) < 200:
+            import time
+            current_time = time.time()
+            
+            # Check if this is same command we saw recently
+            if last_command.get("text") == line and (current_time - last_command.get("time", 0)) < COMMAND_COOLDOWN:
+                print(f"[DEBUG] SKIPPED duplicate command (retry loop): {line[:50]}...")
+                return  # Skip this entire output block
+            
+            # Remember this command
+            last_command["text"] = line
+            last_command["time"] = current_time
+
+        # CRITICAL #2: Deduplicate output using SHA256 hash
+        import hashlib
+        line_hash = hashlib.sha256(line.encode()).hexdigest()[:16]  # Use first 16 chars
+        
+        if line_hash in last_hashes:
+            print(f"[DEBUG] SKIPPED duplicate output: {line[:50]}...")
+            return  # Skip this line, it's a duplicate
+        
+        # Remember this hash
+        last_hashes.add(line_hash)
+        if len(last_hashes) > MAX_HASH_TRACKING:
+            # Remove oldest hash (simple FIFO)
+            oldest = next(iter(last_hashes))
+            last_hashes.discard(oldest)
+
         output_buffer.append(line)
 
         if len(output_buffer) >= BUFFER_SIZE:
             # Get last MAX_MESSAGE_LENGTH chars from buffer (keep recent logs)
             all_text = "\n".join(output_buffer)
+            
+            # CRITICAL #3: Global output cooldown - prevent spam regardless of content
+            import hashlib
+            import time
+            output_hash = hashlib.sha256(all_text.encode()).hexdigest()[:20]
+            current_time = time.time()
+            
+            # If we sent similar output recently, skip it
+            if last_output_hash == output_hash and (current_time - last_output_time) < OUTPUT_COOLDOWN:
+                print(f"[DEBUG] SKIPPED duplicate message (global cooldown): {all_text[:50]}...")
+                output_buffer.clear()
+                return
+            
+            # Remember this output
+            last_output_hash = output_hash
+            last_output_time = current_time
 
             # Instead of truncating, split into multiple messages
             if len(all_text) > MAX_MESSAGE_LENGTH:
@@ -339,14 +385,12 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     except Exception as e:
                         print(f"Error sending chunk: {e}")
             else:
-                # Single message fits, edit the initial one
+                # Single message fits, send NEW message (not edit)
                 try:
-                    await initial_message.edit_text(
-                        f"🚀 Task Started\n📁 Project: {project_name}\n\n{all_text}"
-                    )
-                    print(f"[DEBUG] Edited initial message with {len(all_text)} chars")
+                    await update.message.reply_text(f"📊 Output:\n\n{all_text}")
+                    print(f"[DEBUG] Sent output message with {len(all_text)} chars")
                 except Exception as e:
-                    print(f"Error editing message: {e}")
+                    print(f"Error sending output message: {e}")
 
             # Clear buffer after sending
             output_buffer.clear()
@@ -372,14 +416,12 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     except Exception as e:
                         print(f"Error sending chunk: {e}")
             else:
-                # Single message fits, edit the initial one
+                # Single message fits, send NEW message (not edit)
                 try:
-                    await initial_message.edit_text(
-                        f"🚀 Task Started\n📁 Project: {project_name}\n\n{all_text}"
-                    )
-                    print(f"[DEBUG] Flushed initial message with {len(all_text)} chars")
+                    await update.message.reply_text(f"📊 Output:\n\n{all_text}")
+                    print(f"[DEBUG] Sent flush message with {len(all_text)} chars")
                 except Exception as e:
-                    print(f"Error flushing buffer: {e}")
+                    print(f"Error sending flush message: {e}")
 
             # Clear buffer after sending
             output_buffer.clear()
