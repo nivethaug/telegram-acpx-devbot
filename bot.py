@@ -467,6 +467,9 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Mark session as not running
         session_manager.set_session_running(session_id, False)
+        
+        # CRITICAL: Also reset runner.is_running so /stop command works correctly
+        runner.is_running = False
 
         # ACPX returns -6 (SIGABRT) after successful task when usage reporting fails
         # Treat -6 as success since actual task completed
