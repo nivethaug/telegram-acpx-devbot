@@ -163,12 +163,15 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ You are not authorized to use this bot.")
         return
 
-    # Get task description
-    if not context.args:
-        await update.message.reply_text("❌ Please provide a task.\n\nUsage: /dev <task description>")
-        return
+    # Check for --standalone flag
+    standalone = "--standalone" in task
+    if standalone:
+        task = task.replace("--standalone", "").strip()
 
-    task = ' '.join(context.args)
+    # Get task description
+    if not task:
+        await update.message.reply_text("❌ Please provide a task.\n\nUsage: /dev <task description> [--standalone]\n\nOptions:\n  --standalone  Run without creating a session (in current directory)")
+        return
 
     # Check for active session or create temporary one
     chat_id = update.effective_chat.id
@@ -182,12 +185,14 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         session_type = "existing session"
         # Mark session as active
         session_manager.set_session_running(session_id, True)
+        use_session = True
     else:
         # No session - use DEFAULT_WORKSPACE
         workspace_path = DEFAULT_WORKSPACE
         project_display = DEFAULT_WORKSPACE
         session_id = "none"
-        session_type = "no session"
+        session_type = "standalone" if standalone else "no session"
+        use_session = False
 
     # Send initial message with project info
     project_name = os.path.basename(project_display)
@@ -452,9 +457,9 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print(f"[DEBUG] Project display: {project_display}")
         print(f"[DEBUG] About to call runner.run_task...")
 
-        # Call runner.run_task with streaming callback
+        # Call runner.run_task with streaming callback and session flag
         try:
-            return_code = runner.run_task(task, lambda line: asyncio.run_coroutine_threadsafe(send_output(line), loop), project_path=workspace_path)
+            return_code = runner.run_task(task, lambda line: asyncio.run_coroutine_threadsafe(send_output(line), loop), project_path=workspace_path, use_session=use_session)
             print(f"[DEBUG] runner.run_task returned: {return_code}")
             # CRITICAL FIX: Only check process.poll() if runner.process exists
             if runner.process is not None:
@@ -511,13 +516,48 @@ async def server_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /stop command"""
+    """Handle /stop command with session management options"""
     global runner
 
     if not is_user_allowed(update.effective_user.id):
         await update.message.reply_text("❌ You are not authorized to use this bot.")
         return
 
+    # Parse arguments: /stop [clean|delete]
+    args = update.message.text.split()[1:] if len(update.message.text.split()) > 1 else []
+    
+    # Handle clean/delete options
+    if "clean" in args:
+        from session_manager import cleanup_sessions
+        cleaned = cleanup_sessions(max_age_hours=24)  # Clean sessions older than 24 hours
+        await update.message.reply_text(f"🧹 Cleaned up {cleaned} stale session(s)")
+        return
+    
+    if "delete" in args:
+        from session_manager import list_sessions, get_active_session
+        from session_manager import close_session
+        
+        user_sessions = list_sessions(user_id=update.effective_user.id)
+        active = get_active_session(user_id=update.effective_user.id)
+        
+        if user_sessions:
+            message = f"""🗑️ **Session Management**
+
+You have {len(user_sessions)} session(s):
+"""
+            for sess in user_sessions:
+                status_icon = "▶️" if sess["running"] else "⏸️"
+                age_hours = (time.time() - sess["created_at"]) / 3600
+                age_str = f"{age_hours:.1f}h ago"
+                message += f"\n{status_icon} `{sess['session_id']}` - {age_str}"
+            
+            message += f"\n\nEnter session ID to delete (e.g., /stop delete sess_abc123)"
+            await update.message.reply_text(message)
+        else:
+            await update.message.reply_text("ℹ️ No sessions to delete")
+        return
+
+    # Normal stop behavior
     if runner.stop():
         await update.message.reply_text("🛑 Task stopped by user")
     else:
