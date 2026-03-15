@@ -237,8 +237,16 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Usage tracking
             '"used":',
             'used: {',
+            'used: null',
             '"cost":',
             'cost: {',
+            'cost: [',
+            'size:',
+            'size: 200000',
+            
+            # JSON block patterns
+            '} {',
+            '} }',
             
             # Error telemetry (entire lines or parts)
             '"_errors":',
@@ -270,6 +278,16 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Generic JSON telemetry markers
             '{"data": {',
             '{ "_errors":',
+            '"message": \'Invalid params\'',
+            "'message': 'Invalid params'",
+            'message: \'Invalid params\'',
+            'message: "Invalid params"',
+            'data: { ],',
+            'data: { }',
+            
+            # JSON closing patterns
+            '}',
+            '}]',
             
             # Specific ACPX error messages (with quotes)
             '"Invalid input: expected object, received undefined"',
