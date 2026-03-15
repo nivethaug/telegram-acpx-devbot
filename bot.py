@@ -456,7 +456,11 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             return_code = runner.run_task(task, lambda line: asyncio.run_coroutine_threadsafe(send_output(line), loop), project_path=workspace_path)
             print(f"[DEBUG] runner.run_task returned: {return_code}")
-            print(f"[DEBUG] Process poll status: {runner.process.poll()}")
+            # CRITICAL FIX: Only check process.poll() if runner.process exists
+            if runner.process is not None:
+                print(f"[DEBUG] Process poll status: {runner.process.poll()}")
+            else:
+                print(f"[DEBUG] Process is None (already stopped)")
             print(f"[DEBUG] Runner is_running: {runner.is_running}")
         except Exception as e:
             print(f"[DEBUG] EXCEPTION in run_task: {e}")
