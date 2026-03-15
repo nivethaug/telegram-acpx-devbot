@@ -163,10 +163,17 @@ async def dev_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ You are not authorized to use this bot.")
         return
 
+    # Get all arguments first (before any processing)
+    all_args = context.args
+    
     # Check for --standalone flag
-    standalone = "--standalone" in task
+    standalone = "--standalone" in all_args
     if standalone:
-        task = task.replace("--standalone", "").strip()
+        # Remove --standalone flag from args and join remaining
+        task_args = [arg for arg in all_args if arg != "--standalone"]
+        task = ' '.join(task_args)
+    else:
+        task = ' '.join(all_args)
 
     # Get task description
     if not task:
